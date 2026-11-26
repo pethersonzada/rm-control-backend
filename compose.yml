@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: rm_control
+      POSTGRES_DB: rm_control
+      POSTGRES_PASSWORD: ${RM_DB_PASSWORD:?Defina RM_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rm_control", "-d", "rm_control"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  api:
+    build: .
+    environment:
+      RM_MODE: local
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL com o host db}
+      RM_IDENTITIES_JSON: ${RM_IDENTITIES_JSON:?Defina RM_IDENTITIES_JSON}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-ec", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"]
+volumes:
+  postgres-data:

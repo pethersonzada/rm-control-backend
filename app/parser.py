@@ -1,6 +1,7 @@
 import re
 import unicodedata
 from decimal import Decimal, InvalidOperation
+from datetime import datetime
 
 HEADER = re.compile(r"^(\d+)\t(\d+[-\s][^\t]+)\t(\d+[-\s][^\t]+)\t(\d+)\t(.*)$")
 DATE = re.compile(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}")
@@ -8,10 +9,17 @@ STATUSES = ("AGU. RECONFERENCIA", "AGU. ANALISE", "APROVADO", "REPROVADO", "CANC
 PACK = re.compile(r"^[A-ZÀ-Ú]+-\d+(?:[,.]\d+)?$", re.I)
 
 def number(value):
-    return Decimal(value.strip().replace("R$", "").strip().replace(".", "").replace(",", "."))
+    value = value.strip().removeprefix("R$").strip()
+    if not re.fullmatch(r"[+-]?(?:[0-9]+|[0-9]{1,3}(?:\.[0-9]{3})+)(?:,[0-9]+)?", value):
+        raise ValueError("número inválido")
+    return Decimal(value.replace(".", "").replace(",", "."))
 
 def parse_list(text: str):
     records, warnings = [], []
+    blocked = False
+    item_keys = set()
+    seen_records = set()
+    ignored = 0
     current = None
     in_products = False
     metadata = []
@@ -20,7 +28,15 @@ def parse_list(text: str):
             return
         combined = " ".join(metadata)
         normalized = "".join(c for c in unicodedata.normalize("NFKD", combined.upper()) if not unicodedata.combining(c))
-        dates = DATE.findall(combined)
+        nonlocal blocked
+        dates = []
+        for candidate in DATE.findall(combined):
+            try:
+                datetime.strptime(candidate, "%d/%m/%Y %H:%M:%S")
+                dates.append(candidate)
+            except ValueError:
+                warnings.append(f"Chamado {current['code']}: data inválida.")
+                blocked = True
         current["included_at"] = dates[0] if dates else None
         current["approved_at"] = dates[1] if len(dates) > 1 else None
         current["is_test"] = bool(re.search(r"\bTESTE\b.*\bNAO ENVIAR\b", normalized))
@@ -39,6 +55,12 @@ def parse_list(text: str):
             finish()
             code, origin, destination, load, rest = match.groups()
             current = dict(code=code, origin=origin, destination=destination, load=load, reason="", included_at=None, status="DESCONHECIDO", items=[])
+            key = (code, destination)
+            if key in seen_records:
+                warnings.append(f"Chamado {code}: duplicado na listagem.")
+                blocked = True
+            seen_records.add(key)
+            item_keys = set()
             metadata = [rest]
             in_products = False
             continue
@@ -48,14 +70,17 @@ def parse_list(text: str):
         if len(cols) >= 4 and cols[0].isdigit() and PACK.fullmatch(cols[3].strip()):
             try:
                 qty = number(cols[2])
-                if not qty.is_finite() or qty < 0:
+                if not qty.is_finite():
                     raise ValueError()
                 item = dict(code=cols[0], description=cols[1], quantity=str(qty), package=cols[3], total=None)
-                if any((i["code"], i["package"]) == (item["code"], item["package"]) for i in current["items"]):
+                if (item["code"], item["package"]) in item_keys:
                     warnings.append(f"Chamado {current['code']}: item repetido; revise antes de salvar.")
+                    blocked = True
+                item_keys.add((item["code"], item["package"]))
                 current["items"].append(item)
             except (InvalidOperation, ValueError):
                 warnings.append(f"Chamado {current['code']}: quantidade inválida.")
+                blocked = True
             in_products = True
         elif line in {"CÓDIGO", "PRODUTO", "DESCRIÇÃO", "QUANTIDDE", "INFORMADA", "EMBALAGEM", "OBSERVAÇÃO"}:
             in_products = True
@@ -65,10 +90,15 @@ def parse_list(text: str):
                 reason = line.split("\t")[0].strip()
                 if reason and not DATE.search(reason) and reason.upper() != "MANUAL":
                     current["reason"] = reason
+        elif cols[0].isdigit() or len(cols) >= 3:
+            ignored += 1
+            blocked = True
     finish()
+    if ignored:
+        warnings.append(f"{ignored} linhas de produtos fora do formato esperado.")
     if not records:
         warnings.append("Nenhum chamado reconhecido. Confira o formato copiado.")
-    return {"records": records, "warnings": warnings}
+    return {"records": records, "warnings": warnings[:100], "blocked": blocked}
 
 
 def parse(text: str, target_code: str | None = None):
@@ -79,9 +109,12 @@ def parse(text: str, target_code: str | None = None):
         return result
     detail = split[1].replace("\r", "")
     lines = [line.strip() for line in detail.splitlines()]
+    def normalized(label):
+        return "".join(c for c in unicodedata.normalize("NFKD", label.upper()) if not unicodedata.combining(c))
+
     def field(label):
         for i, line in enumerate(lines[:-1]):
-            if line == label:
+            if normalized(line) == normalized(label):
                 return lines[i + 1]
         return None
     load, bdv = field("Nº Carga"), field("Nº BDV")
@@ -96,34 +129,40 @@ def parse(text: str, target_code: str | None = None):
     record = candidates[0]
     record["bdv"] = bdv if bdv and bdv.isdigit() else None
     mode = None
+    detailed = set()
+    observed = {(item["code"], item["package"]): item for item in record["items"]}
+    malformed = 0
     for line in lines:
-        if line.startswith("COD. PRODUTO\t"):
+        if normalized(line).startswith("COD. PRODUTO\t"):
             mode = "products"
             record["detail_imported"] = True
             continue
-        if line.startswith("NUMERO NF\t"):
+        if normalized(line).startswith("NUMERO NF\t"):
             mode = "invoices"
             continue
         cols = line.split("\t")
         if not cols[0].isdigit():
+            if mode and len(cols) >= 2:
+                malformed += 1
             continue
         if mode == "products" and len(cols) >= 6 and PACK.fullmatch(cols[2]):
             try:
                 quantity, unit, total = map(number, (cols[3], cols[4], cols[5]))
-                if any(not n.is_finite() or n < 0 for n in (quantity, unit, total)):
+                if any(not n.is_finite() for n in (quantity, unit, total)):
                     raise ValueError()
             except (InvalidOperation, ValueError):
                 warnings.append(f"Chamado {record['code']}: valor ou quantidade inválido no item {cols[0]}.")
                 result["blocked"] = True
                 continue
             item = dict(code=cols[0], description=cols[1], package=cols[2], quantity=str(quantity), unit_value=str(unit), total=str(total))
-            matches = [i for i in record["items"] if (i["code"], i["package"]) == (item["code"], item["package"])]
-            if len(matches) > 1 or (matches and matches[0].get("unit_value") is not None):
+            key = (item["code"], item["package"])
+            if key in detailed:
                 warnings.append(f"Chamado {record['code']}: item detalhado duplicado.")
                 result["blocked"] = True
                 continue
-            if matches:
-                matches[0].update(item)
+            detailed.add(key)
+            if key in observed:
+                observed[key].update(item)
             else:
                 record["items"].append(item)
         elif mode == "invoices" and len(cols) >= 2 and cols[1].isdigit():
@@ -131,10 +170,15 @@ def parse(text: str, target_code: str | None = None):
             invoices = record.setdefault("invoices", [])
             if invoice not in invoices:
                 invoices.append(invoice)
+        elif mode:
+            malformed += 1
+    if malformed:
+        warnings.append(f"{malformed} linhas de detalhes fora do formato esperado.")
+        result["blocked"] = True
     if not mode:
         warnings.append("Nenhuma tabela de detalhes reconhecida.")
         result["blocked"] = True
-    if mode == "products" and not any(i.get("unit_value") is not None for i in record["items"]):
+    if record.get("detail_imported") and not detailed:
         warnings.append("Nenhum preço detalhado reconhecido.")
         result["blocked"] = True
     return result

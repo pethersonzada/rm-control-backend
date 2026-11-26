@@ -1,0 +1,101 @@
+import unicodedata
+from collections import defaultdict
+from decimal import Decimal
+
+from fastapi import HTTPException
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
+
+from app.config import store_key
+from app.models import Occurrence, OccurrenceItem
+from app.parser import STATUSES
+from app.repositories import occurrences
+from app.security import require_store
+
+PENDING = {"AGU. ANALISE", "AGU. RECONFERENCIA", "EM ANALISE", "PENDENTE", "FORA DO PRAZO"}
+
+
+def normalized(value):
+    return " ".join("".join(
+        char for char in unicodedata.normalize("NFKD", value.upper()) if not unicodedata.combining(char)
+    ).split())
+
+
+def totals(engine, principal):
+    columns = (OccurrenceItem.total, Occurrence.reason)
+    scoped = (
+        Occurrence.organization == principal.organization, Occurrence.store.in_(principal.stores),
+        or_(Occurrence.is_test.is_(None), Occurrence.is_test.is_(False)),
+    )
+    result = {reason: Decimal("0") for reason in ("FALTA", "SOBRA", "AVARIA")}
+    missing = 0
+    signed = False
+    with Session(engine) as session:
+        query = select(*columns).join(Occurrence).where(*scoped).execution_options(yield_per=500)
+        for value, reason in session.execute(query):
+            if value is None:
+                missing += 1
+            elif normalized(reason) in result:
+                result[normalized(reason)] += value
+                signed |= value < 0
+        status_counts = dict(session.execute(
+            select(Occurrence.status, func.count()).where(*scoped).group_by(Occurrence.status)
+        ).all())
+        count = sum(status_counts.values())
+    return {
+        "occurrences": count, "items_without_value": missing, "status_counts": status_counts,
+        "totals_by_reason": {reason: format(value, "f") for reason, value in result.items()},
+        "net_reported": None if signed else format(result["SOBRA"] - result["FALTA"] - result["AVARIA"], "f"),
+        "approved": None, "recovered": None, "pending": None,
+        "note": ("Saldo indisponível enquanto houver valores informados com sinais que precisam de validação. " if signed else "")
+                + "Aprovação, recuperação e saldo pendente exigem lançamentos financeiros validados.",
+    }
+
+
+def reconcile(engine, principal, body):
+    require_store(principal, body.destination)
+    codes = {item.code for item in body.items}
+    if len(codes) != len(body.items):
+        raise HTTPException(422, "PLUs repetidos no inventário; consolide os registros antes da análise.")
+    selected = defaultdict(list)
+    query = select(
+        Occurrence.code, Occurrence.reason, Occurrence.status, OccurrenceItem,
+    ).join(Occurrence).where(
+        Occurrence.organization == principal.organization,
+        Occurrence.store == store_key(body.destination),
+        Occurrence.is_test.is_not(True),
+        OccurrenceItem.code.in_(codes),
+    ).order_by(Occurrence.id, OccurrenceItem.id).limit(20001)
+    with Session(engine) as session:
+        for index, (code, reason, status, item) in enumerate(session.execute(query)):
+            if index == 20000:
+                raise HTTPException(422, "Resultado excede o limite. Confira um conjunto menor de PLUs.")
+            if normalized(status) in PENDING:
+                selected[item.code].append({
+                    "occurrence": code, "reason": reason, "quantity": format(item.quantity, "f"),
+                    "package": item.package, "total": format(item.total, "f") if item.total is not None else None,
+                })
+    return {"items": [{
+        "code": item.code, "inventory_quantity": format(item.quantity, "f"),
+        "inventory_value": format(item.value, "f") if item.value is not None else None,
+        "pending": selected[item.code],
+    } for item in body.items],
+        "note": "Cruzamento por loja e PLU. A quantidade de cada embalagem está na unidade de origem."}
+
+
+def change_status(engine, principal, store, code, body):
+    require_store(principal, store)
+    status = normalized(body.status)
+    if status not in STATUSES:
+        raise HTTPException(422, "Status de destino desconhecido.")
+    with occurrences.transaction(engine) as session:
+        row = occurrences.locked(session, principal, store_key(store), code)
+        if row is None:
+            raise HTTPException(404, "Chamado não encontrado.")
+        if row.status != body.expected_status:
+            raise HTTPException(409, "O status mudou. Atualize a ocorrência antes de continuar.")
+        if status != row.status:
+            previous = row.status
+            row.status = status
+            occurrences.audit(session, principal, row, "status", previous)
+        return occurrences.serialize(row)
