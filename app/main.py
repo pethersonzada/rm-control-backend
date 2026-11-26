@@ -17,8 +17,10 @@ class Occurrence(Base):
     code: Mapped[str] = mapped_column(String(40), primary_key=True)
     payload: Mapped[str] = mapped_column(Text)
 
-engine = create_engine(os.getenv("DATABASE_URL", "sqlite:///./rm-control.db"))
-Base.metadata.create_all(engine)
+DEMO = bool(os.getenv("VERCEL")) and not os.getenv("DATABASE_URL")
+engine = None if DEMO else create_engine(os.getenv("DATABASE_URL", "sqlite:///./rm-control.db"))
+if engine is not None:
+    Base.metadata.create_all(engine)
 app = FastAPI(title="RM Control API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","), allow_methods=["GET","POST"], allow_headers=["Content-Type","X-RM-Token"])
 
@@ -63,7 +65,7 @@ class Paste(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "demo": DEMO}
 
 @app.post("/imports/preview", dependencies=[Depends(authorize)])
 def preview(body: Paste):
@@ -71,11 +73,15 @@ def preview(body: Paste):
 
 @app.get("/occurrences", dependencies=[Depends(authorize)])
 def occurrences():
+    if DEMO:
+        return []
     with Session(engine) as session:
         return [Record.model_validate_json(row.payload) for row in session.scalars(select(Occurrence).order_by(Occurrence.code)).all()]
 
 @app.post("/imports/confirm", dependencies=[Depends(authorize)])
 def confirm(records: list[Record]):
+    if DEMO:
+        raise HTTPException(403, "Modo demonstração: registros são armazenados no navegador.")
     if not records or len(records) > 10000 or len({r.code for r in records}) != len(records):
         raise HTTPException(422, "Lote vazio, excessivo ou com chamados duplicados.")
     with Session(engine) as session, session.begin():
@@ -156,6 +162,8 @@ class InventoryRequest(BaseModel):
 
 @app.post("/inventory/reconcile", dependencies=[Depends(authorize)])
 def reconcile(body: InventoryRequest):
+    if DEMO:
+        raise HTTPException(403, "Modo demonstração: conferência realizada no navegador.")
     if len({i.code for i in body.items}) != len(body.items):
         raise HTTPException(422, "PLUs repetidos no inventário; consolide os registros antes da análise.")
     pending = {"AGU. ANALISE", "AGU. RECONFERENCIA", "EM ANALISE", "PENDENTE", "FORA DO PRAZO"}
