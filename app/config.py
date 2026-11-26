@@ -38,9 +38,12 @@ class Settings:
     origins: tuple[str, ...]
     calendars: dict[str, Calendar] = field(default_factory=dict)
 
+    firebase_project_id: str | None = None
+    allow_legacy_token: bool = False
+
     @property
     def enabled(self) -> bool:
-        return self.mode in {"local", "operational"} and bool(self.database_url and self.identities)
+        return self.mode in {"local", "operational"} and bool(self.database_url and (self.identities or self.firebase_project_id))
 
 
 def load_settings() -> Settings:
@@ -54,7 +57,14 @@ def load_settings() -> Settings:
     )
     identities = {}
     calendars = {}
+    firebase_project_id = None
+    allow_legacy_token = False
     try:
+        if mode in {"local", "operational"}:
+            firebase_project_id = os.getenv("RM_FIREBASE_PROJECT_ID") or None
+            if firebase_project_id and not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", firebase_project_id):
+                raise ValueError
+            allow_legacy_token = os.getenv("RM_ALLOW_LEGACY_TOKEN") == "1"
         if mode == "local" and os.getenv("RM_HOSTED") == "1":
             raise ValueError
         if mode == "operational" and (
@@ -100,4 +110,4 @@ def load_settings() -> Settings:
                 )
     except (TypeError, KeyError, ValueError, ZoneInfoNotFoundError):
         return Settings("disabled", None, {}, ())
-    return Settings(mode, url, identities, origins, calendars)
+    return Settings(mode, url, identities, origins, calendars, firebase_project_id, allow_legacy_token)
