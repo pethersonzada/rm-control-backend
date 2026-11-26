@@ -111,3 +111,19 @@ class AuditEvent(Base):
     previous_status: Mapped[str | None] = mapped_column(String(80))
     next_status: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FirebaseMembership(Base):
+    __tablename__ = "rm_firebase_memberships"
+    __table_args__ = (
+        UniqueConstraint("project_id", "uid", name="uq_rm_firebase_uid"),
+        UniqueConstraint("organization", "subject", name="uq_rm_firebase_subject"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(100))
+    uid: Mapped[str] = mapped_column(String(128))
+    subject: Mapped[str] = mapped_column(String(80))
+    organization: Mapped[str] = mapped_column(String(80))
+    role: Mapped[str] = mapped_column(String(20))
+    stores: Mapped[list[str]] = mapped_column(JSON)
+    active: Mapped[bool] = mapped_column(Boolean)
