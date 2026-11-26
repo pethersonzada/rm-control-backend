@@ -2,7 +2,7 @@
 
 API REST para importação e acompanhamento de ocorrências logísticas.
 
-> Versão 0.1.0 — protótipo em desenvolvimento, para execução local.
+> Versão 0.2.0 — protótipo em desenvolvimento, para execução local.
 
 ## Funcionalidades implementadas
 
@@ -60,11 +60,18 @@ python -m pytest
 
 Os casos iniciais utilizam dados sintéticos. A importação precisa ser validada com amostras autorizadas, incluindo todos os estados e formatos de registros.
 
+## Novidades da versão 0.2
+
+- Detalhes de produtos e notas fiscais (número e série; chaves fiscais e dados de motoristas não são persistidos).
+- POST /imports/spreadsheet: prévia de histórico XLSX por cabeçalhos; conflitos bloqueiam importação por padrão.
+- GET /summary: valores informados, sem equivalência automática a ressarcimentos aprovados.
+- POST /inventory/reconcile: cruza divergências por loja e PLU com chamados pendentes; não aplica ajustes.
+- Token opcional: configure RM_ACCESS_TOKEN no ambiente e envie o cabeçalho X-RM-Token. Nunca coloque o token em código público.
+- GitHub Actions para testes e validação de sintaxe.
+
 ## Limitações
 
-A versão inicial importa a listagem geral; ainda não processa as abas detalhadas, notas fiscais ou valores financeiros, não importa o histórico Excel e não realiza conciliação de inventários. O código da ocorrência é tratado como identificador único. O armazenamento inicial usa JSON por ocorrência; será necessário normalizar as tabelas e adicionar migrações para a versão seguinte.
-
-Sem autenticação, autorização ou controle de acesso. Não exponha a API fora da máquina local.
+A identificação de chamados usa o código da ocorrência. Registros de fontes diferentes com itens no mesmo chamado exigem revisão manual; não são mesclados automaticamente. A importação histórica usa valores salvos no XLSX e não recalcula fórmulas. A conciliação é preliminar: não soma embalagens incompatíveis nem calcula ajustes financeiros. Prazos, autenticação individual e permissões por perfil ainda precisam ser implementados. O armazenamento inicial usa JSON por ocorrência; normalização e migrações permanecem pendentes. Não exponha a API fora da máquina local.
 
 Frontend: https://github.com/pethersonzada/rm-control-frontend
 
