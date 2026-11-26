@@ -26,7 +26,7 @@ def day(value, epoch):
         return value.strftime("%d/%m/%Y")
     return str(value).strip() or None
 
-def parse_workbook(content_base64, sheet=None):
+def parse_workbook(content_base64, sheet=None, skip_invalid=False):
     try:
         data = base64.b64decode(content_base64, validate=True)
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -56,6 +56,7 @@ def parse_workbook(content_base64, sheet=None):
         ws, start, headers = selected
         records, warnings = {}, []
         blocked = False
+        rejected = set()
         for n, row in enumerate(ws.iter_rows(min_row=start+1, max_col=max(headers.values())+1, values_only=True), start+1):
             if n > 100000:
                 raise ValueError("Limite de 100 mil linhas excedido.")
@@ -66,10 +67,13 @@ def parse_workbook(content_base64, sheet=None):
             if not code or not plu:
                 if code or plu:
                     warnings.append(f"Linha {n}: chamado ou PLU ausente.")
+                    if code:
+                        rejected.add(code)
                     blocked = True
                 continue
             if not code.isdigit() or not plu.isdigit():
                 warnings.append(f"Linha {n}: identificador inválido.")
+                rejected.add(code)
                 blocked = True
                 continue
             reason = normalize(val("TIPO DA DIVERGÊNCIA"))
@@ -81,19 +85,27 @@ def parse_workbook(content_base64, sheet=None):
                     raise ValueError()
             except (InvalidOperation, ValueError, TypeError):
                 warnings.append(f"Linha {n}: quantidade ou valor inválido.")
+                rejected.add(code)
                 blocked = True
                 continue
             record = records.setdefault(code, dict(code=code, origin=identifier(val("CD ORIGEM")), destination=identifier(val("LOJA")), load="", bdv=identifier(val("N° BDV")) or None, reason=reason, received_at=day(val("DATA RECEBIMENTO"), workbook.epoch), returned_at=day(val("DATA RETORNO CD"), workbook.epoch), status=normalize(val("SITUAÇÃO DO CHAMADO")) or "DESCONHECIDO", source="spreadsheet", items=[]))
             if record["reason"] != reason or record["destination"] != identifier(val("LOJA")) or record["bdv"] != (identifier(val("N° BDV")) or None):
                 warnings.append(f"Linha {n}: informações conflitantes no mesmo chamado.")
+                rejected.add(code)
                 blocked = True
                 continue
             package = identifier(val("VOLUME")) or "NÃO INFORMADO"
             if any(i["code"] == plu and i["package"] == package for i in record["items"]):
                 warnings.append(f"Linha {n}: PLU e embalagem repetidos; revise antes de importar.")
+                rejected.add(code)
                 blocked = True
                 continue
             record["items"].append(dict(code=plu, description=identifier(val("DESCRIÇÃO PRODUTO")), quantity=str(abs(qty)), package=package, total=str(total) if total is not None else None, category=identifier(val("CATEGORIA")) or None))
+        if skip_invalid and blocked:
+            for code in rejected:
+                records.pop(code, None)
+            warnings.append("Importação parcial autorizada: chamados com conflito foram excluídos integralmente; linhas sem código ficaram de fora.")
+            blocked = False
         if not records:
             warnings.append("Nenhum registro reconhecido.")
         return {"records": list(records.values()), "warnings": warnings, "blocked": blocked}
