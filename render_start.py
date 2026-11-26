@@ -14,7 +14,8 @@ def main():
     if os.getenv("RM_HOSTED") != "1" or os.getenv("RM_MODE") != "operational" or os.getenv("VERCEL"):
         raise SystemExit("Invalid Render test environment.")
     token = os.getenv("RM_HOMOLOGATION_TOKEN", "")
-    if len(token) < 32:
+    use_legacy = not os.getenv("RM_FIREBASE_PROJECT_ID") or os.getenv("RM_ALLOW_LEGACY_TOKEN") == "1"
+    if use_legacy and len(token) < 32:
         raise SystemExit("Missing test credential.")
     try:
         url = make_url(os.environ["DATABASE_URL"])
@@ -36,7 +37,7 @@ def main():
             "subject": "test-admin", "organization": "rm-homologacao",
             "role": "admin", "stores": ["2"]
         }
-    })
+    } if use_legacy else {})
     os.environ["RM_CALENDARS_JSON"] = "{}"
     from app.config import load_settings
     if not load_settings().enabled:
