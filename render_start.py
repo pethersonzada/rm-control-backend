@@ -5,7 +5,9 @@ import os
 import subprocess
 import sys
 
+import certifi
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 def main():
@@ -22,12 +24,12 @@ def main():
             raise ValueError
         if "-pooler" in url.host:
             raise ValueError
-        url = url.set(drivername="postgresql+psycopg").update_query_dict({"sslmode": "verify-full"})
+        url = url.set(drivername="postgresql+psycopg").update_query_dict({"sslmode": "verify-full", "sslrootcert": certifi.where()})
         os.environ["DATABASE_URL"] = url.render_as_string(hide_password=False)
         port = int(os.environ.get("PORT", "10000"))
         if not 1 <= port <= 65535:
             raise ValueError
-    except (KeyError, ValueError, TypeError):
+    except (ArgumentError, KeyError, ValueError, TypeError):
         raise SystemExit("Use the direct TLS connection for the Neon rm_control test database.") from None
     os.environ["RM_IDENTITIES_JSON"] = json.dumps({
         hashlib.sha256(token.encode()).hexdigest(): {
