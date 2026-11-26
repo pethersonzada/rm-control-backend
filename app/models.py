@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func,
+    Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, UniqueConstraint, false, func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -110,4 +110,40 @@ class AuditEvent(Base):
     occurrence_id: Mapped[int] = mapped_column(ForeignKey("rm_occurrences.id"))
     previous_status: Mapped[str | None] = mapped_column(String(80))
     next_status: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FirebaseMembership(Base):
+    __tablename__ = "rm_firebase_memberships"
+    __table_args__ = (
+        UniqueConstraint("project_id", "uid", name="uq_rm_firebase_uid"),
+        UniqueConstraint("organization", "subject", name="uq_rm_firebase_subject"),
+        CheckConstraint("role IN ('viewer', 'importer', 'admin')", name="ck_rm_firebase_role"),
+        Index("ix_rm_firebase_org", "project_id", "organization", "role"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(100))
+    uid: Mapped[str] = mapped_column(String(128))
+    subject: Mapped[str] = mapped_column(String(80))
+    organization: Mapped[str] = mapped_column(String(80))
+    role: Mapped[str] = mapped_column(String(20))
+    stores: Mapped[list[str]] = mapped_column(JSON)
+    active: Mapped[bool] = mapped_column(Boolean)
+
+
+    can_delegate_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+
+
+class MembershipAudit(Base):
+    __tablename__ = "rm_membership_audit"
+    __table_args__ = (Index("ix_rm_membership_audit_org", "project_id", "organization", "id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(100))
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    target_uid: Mapped[str] = mapped_column(String(128))
+    action: Mapped[str] = mapped_column(String(40))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

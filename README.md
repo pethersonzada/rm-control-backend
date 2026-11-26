@@ -51,3 +51,5 @@ python -m compileall -q app migrations
 A suíte usa dados sintéticos e executa SQLite. Defina `RM_TEST_POSTGRES_URL` para incluir PostgreSQL. Use um banco descartável e exclusivo com nome terminado em `_test`. A suíte reverte e reaplica as migrações entre testes. A massa XLSX de 14 a 20 MB é gerada no teste e descartada. Confira o [CHANGELOG](CHANGELOG.md).
 
 Software proprietário. Consulte [LICENSE](LICENSE).
+
+A homologação autenticada usa Firebase, Render e Neon. Consulte [Firebase na homologação](docs/firebase-homologacao.md) para provisionamento, permissões e validação.

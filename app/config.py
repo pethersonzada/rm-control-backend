@@ -20,6 +20,9 @@ class Identity:
     organization: str
     role: str
     stores: frozenset[str]
+    firebase_project: str | None = None
+    firebase_uid: str | None = None
+    can_delegate_admin: bool = False
 
 
 @dataclass(frozen=True)
@@ -38,9 +41,12 @@ class Settings:
     origins: tuple[str, ...]
     calendars: dict[str, Calendar] = field(default_factory=dict)
 
+    firebase_project_id: str | None = None
+    allow_legacy_token: bool = False
+
     @property
     def enabled(self) -> bool:
-        return self.mode in {"local", "operational"} and bool(self.database_url and self.identities)
+        return self.mode in {"local", "operational"} and bool(self.database_url and (self.identities or self.firebase_project_id))
 
 
 def load_settings() -> Settings:
@@ -54,7 +60,14 @@ def load_settings() -> Settings:
     )
     identities = {}
     calendars = {}
+    firebase_project_id = None
+    allow_legacy_token = False
     try:
+        if mode in {"local", "operational"}:
+            firebase_project_id = os.getenv("RM_FIREBASE_PROJECT_ID") or None
+            if firebase_project_id and not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", firebase_project_id):
+                raise ValueError
+            allow_legacy_token = os.getenv("RM_ALLOW_LEGACY_TOKEN") == "1"
         if mode == "local" and os.getenv("RM_HOSTED") == "1":
             raise ValueError
         if mode == "operational" and (
@@ -63,7 +76,7 @@ def load_settings() -> Settings:
         ):
             raise ValueError
         if mode in {"local", "operational"}:
-            raw = json.loads(os.getenv("RM_IDENTITIES_JSON", "{}"))
+            raw = json.loads(os.getenv("RM_IDENTITIES_JSON", "{}")) if not firebase_project_id or allow_legacy_token else {}
             subjects = set()
             if not isinstance(raw, dict) or len(raw) > 10000:
                 raise ValueError
@@ -87,7 +100,8 @@ def load_settings() -> Settings:
             if not isinstance(raw_calendars, dict):
                 raise ValueError
             for organization, entry in raw_calendars.items():
-                if organization not in organizations or not isinstance(entry, dict):
+                if (not isinstance(entry, dict) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", organization)
+                        or (not firebase_project_id and organization not in organizations)):
                     raise ValueError
                 days, start_field = entry["days"], entry["start_field"]
                 holidays = entry.get("holidays", [])
@@ -100,4 +114,4 @@ def load_settings() -> Settings:
                 )
     except (TypeError, KeyError, ValueError, ZoneInfoNotFoundError):
         return Settings("disabled", None, {}, ())
-    return Settings(mode, url, identities, origins, calendars)
+    return Settings(mode, url, identities, origins, calendars, firebase_project_id, allow_legacy_token)

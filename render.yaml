@@ -18,5 +18,9 @@ services:
         sync: false
       - key: RM_HOMOLOGATION_TOKEN
         generateValue: true
+      - key: RM_FIREBASE_PROJECT_ID
+        value: rm-control-webapp
+      - key: RM_ALLOW_LEGACY_TOKEN
+        value: "0"
       - key: CORS_ORIGINS
-        value: ""
+        value: https://rm-control-homologacao.vercel.app

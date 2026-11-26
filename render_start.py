@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -14,7 +15,8 @@ def main():
     if os.getenv("RM_HOSTED") != "1" or os.getenv("RM_MODE") != "operational" or os.getenv("VERCEL"):
         raise SystemExit("Invalid Render test environment.")
     token = os.getenv("RM_HOMOLOGATION_TOKEN", "")
-    if len(token) < 32:
+    use_legacy = not os.getenv("RM_FIREBASE_PROJECT_ID") or os.getenv("RM_ALLOW_LEGACY_TOKEN") == "1"
+    if use_legacy and len(token) < 32:
         raise SystemExit("Missing test credential.")
     try:
         url = make_url(os.environ["DATABASE_URL"])
@@ -36,14 +38,27 @@ def main():
             "subject": "test-admin", "organization": "rm-homologacao",
             "role": "admin", "stores": ["2"]
         }
-    })
-    os.environ["RM_CALENDARS_JSON"] = "{}"
+    } if use_legacy else {})
     from app.config import load_settings
     if not load_settings().enabled:
         raise SystemExit("Invalid test environment settings.")
     result = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], capture_output=True)
     if result.returncode:
         raise SystemExit("Database migration failed; inspect configuration privately.")
+    uid = os.getenv("RM_BOOTSTRAP_ADMIN_UID")
+    project = os.getenv("RM_FIREBASE_PROJECT_ID")
+    if uid:
+        if not project or not re.fullmatch(r"[!-~]{1,128}", uid):
+            raise SystemExit("Invalid confirmed Firebase administrator UID.")
+        from app.database import connect
+        from app.services.memberships import bootstrap
+        engine = connect(os.environ["DATABASE_URL"])
+        try:
+            bootstrap(engine, project, "rm-homologacao", uid, {"2"})
+        except Exception:
+            raise SystemExit("Firebase administrator provisioning failed.") from None
+        finally:
+            engine.dispose()
     os.execv(sys.executable, [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(port), "--no-access-log", "--workers", "1"])
 
 

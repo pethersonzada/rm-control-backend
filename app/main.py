@@ -10,8 +10,8 @@ from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 from app.config import load_settings
 from app.database import connect
-from app.models import Occurrence
-from app.routers import imports, operations
+from app.models import FirebaseMembership, Occurrence
+from app.routers import admin, imports, operations
 from app.security import RateLimiter, RequestLimits
 
 logger = logging.getLogger("rm_control")
@@ -31,8 +31,9 @@ def create_app(settings=None, engine=None):
     app.add_middleware(RequestLimits)
     app.add_middleware(
         CORSMiddleware, allow_origins=list(settings.origins),
-        allow_methods=["GET", "POST", "PATCH"],
+        allow_methods=["GET", "POST", "PATCH", "PUT"],
         allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        expose_headers=["X-RM-Account-Denied", "Retry-After"],
     )
 
     @app.middleware("http")
@@ -68,8 +69,11 @@ def create_app(settings=None, engine=None):
             raise HTTPException(503, "Ambiente operacional indisponível.")
         with engine.connect() as connection:
             connection.execute(select(Occurrence.id).limit(1))
+            if settings.firebase_project_id:
+                connection.execute(select(FirebaseMembership.id).limit(1))
         return {"status": "ready"}
 
+    app.include_router(admin.router)
     app.include_router(operations.router)
     app.include_router(imports.router)
     return app
