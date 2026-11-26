@@ -1,9 +1,10 @@
 import re
+import unicodedata
 from decimal import Decimal, InvalidOperation
 
 HEADER = re.compile(r"^(\d+)\t(\d+[-\s][^\t]+)\t(\d+[-\s][^\t]+)\t(\d+)\t(.*)$")
 DATE = re.compile(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}")
-STATUSES = ("AGU. ANALISE", "APROVADO", "REPROVADO", "CANCELADO", "PENDENTE", "EM ANALISE", "FORA DO PRAZO")
+STATUSES = ("AGU. RECONFERENCIA", "AGU. ANALISE", "APROVADO", "REPROVADO", "CANCELADO", "PENDENTE", "EM ANALISE", "FORA DO PRAZO")
 PACK = re.compile(r"^[A-ZÀ-Ú]+-\d+(?:[,.]\d+)?$", re.I)
 
 def number(value):
@@ -18,11 +19,12 @@ def parse_list(text: str):
         if current is None:
             return
         combined = " ".join(metadata)
+        normalized = "".join(c for c in unicodedata.normalize("NFKD", combined.upper()) if not unicodedata.combining(c))
         dates = DATE.findall(combined)
         current["included_at"] = dates[0] if dates else None
         current["approved_at"] = dates[1] if len(dates) > 1 else None
-        current["is_test"] = bool(re.search(r"\bTESTE\b.*\bNAO ENVIAR\b", combined.upper()))
-        current["status"] = next((s for s in STATUSES if re.search(r"(?<!\w)" + re.escape(s) + r"(?!\w)", combined.upper())), "DESCONHECIDO")
+        current["is_test"] = bool(re.search(r"\bTESTE\b.*\bNAO ENVIAR\b", normalized))
+        current["status"] = next((s for s in STATUSES if re.search(r"(?<!\w)" + re.escape(s) + r"(?!\w)", normalized)), "DESCONHECIDO")
         if current["status"] == "DESCONHECIDO":
             warnings.append(f"Chamado {current['code']}: status não reconhecido.")
         if not current["items"]:
