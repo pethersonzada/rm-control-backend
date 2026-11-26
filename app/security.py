@@ -9,6 +9,9 @@ from fastapi import HTTPException, Request
 from starlette.responses import JSONResponse
 
 from app.config import Identity, store_key
+from app.firebase_auth import FirebaseUnavailable, InvalidFirebaseToken, membership, verify_uid
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 
 class RateLimiter:
@@ -48,7 +51,18 @@ def authenticate(request: Request) -> Identity:
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     principal = None
-    if scheme.lower() == "bearer" and re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+    if scheme.lower() == "bearer" and settings.firebase_project_id and token.count(".") == 2:
+        limiter.check(("firebase", address), 180)
+        try:
+            uid = verify_uid(token, settings.firebase_project_id)
+            principal = membership(request.app.state.engine, settings.firebase_project_id, uid)
+        except InvalidFirebaseToken:
+            raise HTTPException(401, "Credencial Firebase inválida.", headers={"WWW-Authenticate": "Bearer"}) from None
+        except (FirebaseUnavailable, SQLAlchemyError):
+            raise HTTPException(503, "Autenticação temporariamente indisponível.") from None
+        if principal is None:
+            raise HTTPException(403, "Conta sem autorização para acessar o RM Control.")
+    elif scheme.lower() == "bearer" and (not settings.firebase_project_id or settings.allow_legacy_token) and re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
         principal = settings.identities.get(hashlib.sha256(token.encode("ascii")).hexdigest())
     if principal is None:
         limiter.check(("anonymous", address), 60)
@@ -97,7 +111,7 @@ class RequestLimits:
             await self.app(scope, receive, secure_send)
             return
         try:
-            principal = authenticate(request)
+            principal = await run_in_threadpool(authenticate, request)
             if path.startswith("/imports/") or request.method == "PATCH":
                 can_write(principal)
             request.state.principal = principal
