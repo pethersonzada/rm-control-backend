@@ -24,3 +24,8 @@ typing-inspection==0.4.5
 typing_extensions==4.16.0
 uvicorn==0.54.0
 google-auth==2.63.1
+cffi==2.1.1
+cryptography==50.0.2
+pyasn1==0.6.5
+pyasn1_modules==0.4.2
+pycparser==3.12

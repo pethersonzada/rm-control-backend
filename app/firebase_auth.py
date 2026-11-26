@@ -3,6 +3,7 @@ import json
 import re
 import threading
 import time
+from http.client import HTTPException as HTTPTransportError
 from urllib.request import urlopen
 
 from google.auth import jwt
@@ -41,14 +42,14 @@ def certificates():
                     raise ValueError
                 age = re.search(r"max-age=(\d+)", response.headers.get("Cache-Control", ""))
                 ttl = min(int(age[1]), 86400) if age else 0
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, HTTPTransportError) as error:
             raise FirebaseUnavailable() from error
         _certs, _expires = data, time.monotonic() + ttl
         return _certs
 
 
 def verify_uid(token: str, project: str) -> str:
-    if not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token) or len(token) > 8192:
+    if len(token) > 8192 or not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
         raise InvalidFirebaseToken()
     try:
         header = jwt.decode_header(token)
@@ -62,7 +63,7 @@ def verify_uid(token: str, project: str) -> str:
             or claims.get("aud") != project
             or not isinstance(uid, str) or not 1 <= len(uid) <= 128
             or any(type(claims.get(key)) is not int for key in ("exp", "iat", "auth_time"))
-            or not claims["auth_time"] <= claims["iat"] <= now < claims["exp"]
+            or not 0 < claims["auth_time"] <= claims["iat"] <= now < claims["exp"]
         ):
             raise InvalidFirebaseToken()
         return uid
@@ -86,4 +87,7 @@ def membership(engine, project, uid):
             not isinstance(s, str) or s == "*" or not 1 <= len(store_key(s)) <= 200 for s in stores
         ):
             return None
-        return Identity(member.subject, member.organization, member.role, frozenset(map(store_key, stores)))
+        return Identity(
+            member.subject, member.organization, member.role, frozenset(map(store_key, stores)),
+            project, uid, member.can_delegate_admin,
+        )

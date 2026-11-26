@@ -49,7 +49,8 @@ def list_occurrences(
 @router.get("/me")
 def me(principal: Principal):
     return {"subject": principal.subject, "organization": principal.organization,
-            "role": principal.role, "stores": sorted(principal.stores)}
+            "role": principal.role, "stores": sorted(principal.stores),
+            "can_delegate_admin": principal.can_delegate_admin}
 
 
 @router.patch("/occurrences/{code}/status")

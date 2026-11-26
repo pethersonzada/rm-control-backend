@@ -20,6 +20,9 @@ class Identity:
     organization: str
     role: str
     stores: frozenset[str]
+    firebase_project: str | None = None
+    firebase_uid: str | None = None
+    can_delegate_admin: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,7 +76,7 @@ def load_settings() -> Settings:
         ):
             raise ValueError
         if mode in {"local", "operational"}:
-            raw = json.loads(os.getenv("RM_IDENTITIES_JSON", "{}"))
+            raw = json.loads(os.getenv("RM_IDENTITIES_JSON", "{}")) if not firebase_project_id or allow_legacy_token else {}
             subjects = set()
             if not isinstance(raw, dict) or len(raw) > 10000:
                 raise ValueError
@@ -97,7 +100,8 @@ def load_settings() -> Settings:
             if not isinstance(raw_calendars, dict):
                 raise ValueError
             for organization, entry in raw_calendars.items():
-                if organization not in organizations or not isinstance(entry, dict):
+                if (not isinstance(entry, dict) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", organization)
+                        or (not firebase_project_id and organization not in organizations)):
                     raise ValueError
                 days, start_field = entry["days"], entry["start_field"]
                 holidays = entry.get("holidays", [])

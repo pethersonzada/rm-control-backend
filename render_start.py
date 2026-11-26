@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -38,13 +39,26 @@ def main():
             "role": "admin", "stores": ["2"]
         }
     } if use_legacy else {})
-    os.environ["RM_CALENDARS_JSON"] = "{}"
     from app.config import load_settings
     if not load_settings().enabled:
         raise SystemExit("Invalid test environment settings.")
     result = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], capture_output=True)
     if result.returncode:
         raise SystemExit("Database migration failed; inspect configuration privately.")
+    uid = os.getenv("RM_BOOTSTRAP_ADMIN_UID")
+    project = os.getenv("RM_FIREBASE_PROJECT_ID")
+    if uid:
+        if not project or not re.fullmatch(r"[!-~]{1,128}", uid):
+            raise SystemExit("Invalid confirmed Firebase administrator UID.")
+        from app.database import connect
+        from app.services.memberships import bootstrap
+        engine = connect(os.environ["DATABASE_URL"])
+        try:
+            bootstrap(engine, project, "rm-homologacao", uid, {"2"})
+        except Exception:
+            raise SystemExit("Firebase administrator provisioning failed.") from None
+        finally:
+            engine.dispose()
     os.execv(sys.executable, [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", str(port), "--no-access-log", "--workers", "1"])
 
 
