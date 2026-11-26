@@ -1,0 +1,22 @@
+# Dedicated synthetic-data test API; no paid services or Render database.
+services:
+  - type: web
+    name: rm-control-api-homologacao
+    runtime: docker
+    plan: free
+    region: ohio
+    branch: main
+    dockerCommand: python render_start.py
+    autoDeployTrigger: checksPass
+    healthCheckPath: /ready
+    envVars:
+      - key: RM_MODE
+        value: operational
+      - key: RM_HOSTED
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: RM_HOMOLOGATION_TOKEN
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: ""
