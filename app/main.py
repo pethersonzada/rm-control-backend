@@ -134,11 +134,43 @@ def summary():
 class Spreadsheet(BaseModel):
     content_base64: str = Field(min_length=1, max_length=24000000)
     sheet: str | None = None
+    skip_invalid: bool = False
 
 @app.post("/imports/spreadsheet", dependencies=[Depends(authorize)])
 def spreadsheet(body: Spreadsheet):
     from app.spreadsheet import parse_workbook
     try:
-        return parse_workbook(body.content_base64, body.sheet)
+        return parse_workbook(body.content_base64, body.sheet, body.skip_invalid)
     except ValueError as error:
         raise HTTPException(422, str(error)) from None
+
+
+class InventoryItem(BaseModel):
+    code: str = Field(pattern=r"^\d+$", max_length=40)
+    quantity: Decimal
+    value: Decimal | None = None
+
+class InventoryRequest(BaseModel):
+    destination: str = Field(min_length=1, max_length=200)
+    items: list[InventoryItem] = Field(min_length=1, max_length=10000)
+
+@app.post("/inventory/reconcile", dependencies=[Depends(authorize)])
+def reconcile(body: InventoryRequest):
+    if len({i.code for i in body.items}) != len(body.items):
+        raise HTTPException(422, "PLUs repetidos no inventário; consolide os registros antes da análise.")
+    pending = {"AGU. ANALISE", "AGU. RECONFERENCIA", "EM ANALISE", "PENDENTE", "FORA DO PRAZO"}
+    import unicodedata
+    def norm(value):
+        return "".join(c for c in unicodedata.normalize("NFKD", value.upper()) if not unicodedata.combining(c))
+    def store(value):
+        import re
+        match = re.match(r"^0*(\d+)(?:\s|-|$)", value)
+        return match.group(1) if match else value.strip().upper()
+    by_code = {}
+    for record in occurrences():
+        if record.is_test or store(record.destination) != store(body.destination) or norm(record.status) not in pending:
+            continue
+        for item in record.items:
+            by_code.setdefault(item.code, []).append({"occurrence":record.code, "reason":record.reason, "quantity":str(item.quantity), "package":item.package, "total":str(item.total) if item.total is not None else None})
+    return {"items":[{"code":i.code,"inventory_quantity":str(i.quantity),"inventory_value":str(i.value) if i.value is not None else None,"pending":by_code.get(i.code, [])} for i in body.items],
+            "note":"Cruzamento por loja e PLU. Quantidades de embalagens diferentes não são somadas. Nenhum ajuste contábil é aplicado."}
