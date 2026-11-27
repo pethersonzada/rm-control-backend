@@ -34,6 +34,10 @@ def test_native_tickets_export_and_scope(workspace):
     assert client.put(path, headers=headers(), json=edit).status_code == 409
     rows = client.get("/occurrences", headers=headers(), params={"search": "000123"}).json()["records"]
     assert len(rows) == 1 and rows[0]["reason"] == "AVARIA"
+    history = client.get(f"/occurrences/{ticket['code']}/history?store=2", headers=headers()).json()
+    assert [e["action"] for e in history["events"]] == ["ticket.edit", "ticket.create"]
+    assert "reason" in history["events"][0]["details"]["fields"]
+    assert client.get(f"/occurrences/{ticket['code']}/history?store=2", headers=headers("other")).status_code == 404
     report = client.get("/reports/chamados.xlsx", headers=headers(), params={"store": "2"})
     assert report.status_code == 200
     book = load_workbook(BytesIO(report.content), read_only=True)
