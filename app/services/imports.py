@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from app.config import store_key
 from app.models import NativeTicket
 from app.services.memberships import lock_organization
+from app.services.import_preview import fingerprint
 from sqlalchemy import select
 from app.repositories import occurrences
 from app.schemas import Record
@@ -54,7 +55,13 @@ def confirm(engine, principal, records, key=None):
                 if existing.digest != digest:
                     raise HTTPException(409, "Chave de idempotência já usada em outro lote.")
                 return {"saved": existing.count, "replayed": True}
-        for record in ordered:
+        for incoming in ordered:
+            expected = getattr(incoming, "expected_snapshot", None)
+            record = Record.model_validate(incoming.model_dump(exclude={"expected_snapshot"}))
+            if expected is not None:
+                known = occurrences.locked(session, principal, store_key(record.destination), record.code)
+                if fingerprint(occurrences.serialize(known) if known else None) != expected:
+                    raise HTTPException(409, "Chamado mudou depois da prévia. Analise os dados novamente.")
             if session.scalar(select(NativeTicket.occurrence_id).where(
                 NativeTicket.organization == principal.organization,
                 NativeTicket.store == store_key(record.destination),
