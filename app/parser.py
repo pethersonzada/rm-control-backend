@@ -1,7 +1,12 @@
 import re
+import csv
+import io
 import unicodedata
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
+
+from app.config import store_key
+from app import spreadsheet
 
 HEADER = re.compile(r"^(\d+)\t(\d+[-\s][^\t]+)\t(\d+[-\s][^\t]+)\t(\d+)\t(.*)$")
 DATE = re.compile(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}")
@@ -55,7 +60,6 @@ def parse_list(text: str):
             finish()
             code, origin, destination, load, rest = match.groups()
             current = dict(code=code, origin=origin, destination=destination, load=load, reason="", included_at=None, status="DESCONHECIDO", items=[])
-            from app.config import store_key
             key = (code, store_key(destination))
             if key in seen_records:
                 warnings.append(f"Chamado {code}: duplicado na listagem.")
@@ -103,6 +107,9 @@ def parse_list(text: str):
 
 
 def parse(text: str, target_code: str | None = None, seed=None):
+    tabular = parse_tabular(text)
+    if tabular is not None:
+        return tabular
     result = parse_list(text)
     records, warnings = result["records"], result["warnings"]
     split = re.split(r"(?m)^\s*Editar\s*$", text, maxsplit=1)
@@ -191,3 +198,78 @@ def parse(text: str, target_code: str | None = None, seed=None):
         warnings.append("Nenhum preço detalhado reconhecido.")
         result["blocked"] = True
     return result
+
+
+def parse_tabular(text):
+    """Accept explicit Excel/web TSV headers; never guess column positions."""
+    if "\t" not in text or len(text) > 2_000_000:
+        return None
+    rows = csv.reader(io.StringIO(text), delimiter="\t")
+    headers = None
+    header_row = 0
+    for row_number, row in enumerate(rows, 1):
+        labels = [spreadsheet.normalize(x) for x in row]
+        known = set(labels) & spreadsheet.SUPPORTED
+        if spreadsheet.REQUIRED <= known:
+            headers = {label: i for i, label in enumerate(labels) if label in spreadsheet.SUPPORTED}
+            if len(headers) != sum(label in spreadsheet.SUPPORTED for label in labels):
+                return {"records": [], "warnings": ["Cabeçalhos duplicados."], "blocked": True}
+            header_row = row_number
+            break
+        if row_number >= 30:
+            break
+    if headers is None:
+        return None
+    records, item_keys, warnings = {}, {}, []
+    counts = {"rows": 0, "invalid_rows": 0, "rows_without_value": 0, "omitted_rows": 0}
+    def warn(row, message):
+        counts["invalid_rows"] += 1
+        if len(warnings) < 99:
+            warnings.append(f"Linha {row}: {message}.")
+    for row_number, row in enumerate(rows, header_row + 1):
+        if not any(value.strip() for value in row):
+            continue
+        counts["rows"] += 1
+        if counts["rows"] > 20000:
+            return {"records": [], "warnings": ["Limite de 20 mil linhas excedido."], "blocked": True, "counts": counts}
+        def field(label):
+            col = headers.get(label)
+            return row[col].strip() if col is not None and col < len(row) else ""
+        code, plu = field("N° CHAMADO"), field("PLU")
+        destination, reason = field("LOJA"), spreadsheet.normalize(field("TIPO DA DIVERGENCIA"))
+        if not re.fullmatch(r"[0-9]{1,40}", code) or not re.fullmatch(r"[0-9]{1,40}", plu) or not destination or not reason:
+            warn(row_number, "chamado, PLU, loja ou motivo inválido")
+            continue
+        try:
+            quantity = spreadsheet.amount(field("QTD DIVERGENTE"))
+            total = spreadsheet.amount(field("VALOR DA DIVERGENCIA")) if field("VALOR DA DIVERGENCIA") else None
+            received = spreadsheet.day(field("DATA RECEBIMENTO"), None)
+            returned = spreadsheet.day(field("DATA RETORNO CD"), None)
+        except (ValueError, InvalidOperation, TypeError, OverflowError):
+            warn(row_number, "data, quantidade ou valor inválido")
+            continue
+        package = field("VOLUME") or "NÃO INFORMADO"
+        key = (store_key(destination), code)
+        data = dict(code=code, destination=destination, origin=field("CD ORIGEM"), load="",
+                    bdv=field("N° BDV") or None, reason=reason, received_at=received, returned_at=returned,
+                    status=spreadsheet.normalize(field("SITUACAO DO CHAMADO")) or "DESCONHECIDO",
+                    source="clipboard")
+        if key in records and any(records[key][k] != v for k, v in data.items()):
+            warn(row_number, "metadados conflitantes para o mesmo chamado")
+            continue
+        if key not in records:
+            records[key], item_keys[key] = {**data, "items": []}, set()
+        if (plu, package) in item_keys[key]:
+            warn(row_number, "PLU e embalagem duplicados")
+            continue
+        item_keys[key].add((plu, package))
+        if total is None:
+            counts["rows_without_value"] += 1
+        records[key]["items"].append(dict(code=plu, description=field("DESCRICAO PRODUTO"),
+                                          category=field("CATEGORIA") or None, quantity=quantity, package=package, total=total))
+    if counts["invalid_rows"] > 99:
+        warnings.append(f"{counts['invalid_rows'] - 99} rejeições adicionais.")
+    if not records:
+        warnings.append("Nenhum registro tabulado reconhecido.")
+    return {"records": list(records.values()), "warnings": warnings,
+            "blocked": bool(counts["invalid_rows"] or not records), "counts": counts}
