@@ -7,26 +7,31 @@ from app.config import Identity
 from app.database import database
 from app.schemas import Paste, Record, Spreadsheet
 from app.security import writer
-from app.services import imports
+from app.services import imports, import_preview
 
 router = APIRouter(prefix="/imports")
 Writer = Annotated[Identity, Depends(writer)]
 
 
 @router.post("/preview")
-def preview(body: Paste, principal: Writer, request: Request):
+def preview(body: Paste, principal: Writer, request: Request, engine=Depends(database)):
     with request.app.state.limiter.import_slot():
-        return imports.check_preview(principal, parser.parse(body.text, body.target_code))
+        result = parser.parse(body.text, body.target_code)
+        if not result["records"] and body.target_code:
+            seed = import_preview.detail_seed(engine, principal, body.target_code, body.target_store)
+            if seed:
+                result = parser.parse(body.text, body.target_code, seed)
+        return import_preview.compare_preview(engine, principal, imports.check_preview(principal, result))
 
 
 @router.post("/spreadsheet")
-def spreadsheet_legacy(body: Spreadsheet, principal: Writer, request: Request):
+def spreadsheet_legacy(body: Spreadsheet, principal: Writer, request: Request, engine=Depends(database)):
     with request.app.state.limiter.import_slot():
         try:
             result = spreadsheet.parse_workbook(body.content_base64, body.sheet, body.skip_invalid)
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
-    return imports.check_preview(principal, result)
+    return import_preview.compare_preview(engine, principal, imports.check_preview(principal, result))
 
 
 @router.post("/workbook")
@@ -34,6 +39,7 @@ def workbook(
     principal: Writer, request: Request, file: Annotated[UploadFile, File()],
     sheet: Annotated[str | None, Form(max_length=31)] = None,
     skip_invalid: Annotated[bool, Form()] = False,
+    engine=Depends(database),
 ):
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(422, "Selecione um arquivo XLSX.")
