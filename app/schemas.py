@@ -75,6 +75,7 @@ class Spreadsheet(BaseModel):
 
 
 class InventoryItem(BaseModel):
+    package: str | None = Field(default=None, max_length=80)
     code: Identifier
     quantity: Amount
     value: Amount | None = None

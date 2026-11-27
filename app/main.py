@@ -1,5 +1,7 @@
 import logging
 import time
+import threading
+from collections import Counter
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,8 +12,8 @@ from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 from app.config import load_settings
 from app.database import connect
-from app.models import AccessRequest, FirebaseMembership, NativeTicket, Occurrence, Store
-from app.routers import admin, catalog, imports, operations, stores, tickets
+from app.models import AccessRequest, FirebaseMembership, FinancialReview, NativeTicket, Occurrence, OperationalPolicy, Store, SupplierCheck, UnitReference
+from app.routers import admin, catalog, imports, operations, policies, stores, supplier_checks, tickets, units
 from app.security import RateLimiter, RequestLimits
 
 logger = logging.getLogger("rm_control")
@@ -28,6 +30,9 @@ def create_app(settings=None, engine=None):
             logger.error("database_configuration_invalid")
     app.state.engine = engine
     app.state.limiter = RateLimiter()
+    metrics_lock = threading.Lock()
+    metrics = Counter()
+    uptime_start = time.monotonic()
     app.add_middleware(RequestLimits)
     app.add_middleware(
         CORSMiddleware, allow_origins=list(settings.origins),
@@ -39,7 +44,22 @@ def create_app(settings=None, engine=None):
     @app.middleware("http")
     async def observe(request: Request, call_next):
         started = time.monotonic()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            with metrics_lock:
+                metrics["requests"] += 1
+                metrics["server_errors"] += 1
+            logger.error("unhandled_request_error route=%s", getattr(request.scope.get("route"), "path", "unmatched"))
+            return JSONResponse({"detail":"Erro interno. Tente novamente."},500,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+        duration_ms = (time.monotonic() - started) * 1000
+        with metrics_lock:
+            metrics["requests"] += 1
+            metrics["duration_ms"] += duration_ms
+            metrics["server_errors"] += int(response.status_code >= 500)
+            metrics["client_errors"] += int(400 <= response.status_code < 500)
+            metrics["rate_limited"] += int(response.status_code == 429)
+            metrics["slow_requests"] += int(duration_ms >= 5000)
         route = request.scope.get("route")
         logger.info(
             "http_request route=%s method=%s status=%d duration_ms=%.1f",
@@ -59,6 +79,21 @@ def create_app(settings=None, engine=None):
         logger.warning("database_operation_failed")
         return JSONResponse({"detail": "Banco indisponível ou operação interrompida. Tente novamente."}, 503)
 
+    from app.routers.stores import Admin
+
+    @app.get("/admin/diagnostics")
+    def diagnostics(principal: Admin):
+        if not principal.can_delegate_admin:
+            raise HTTPException(403, "Acesso restrito ao responsável.")
+        with metrics_lock:
+            values = dict(metrics)
+        count = values.get("requests",0)
+        return {"uptime_seconds":int(time.monotonic()-uptime_start),"requests":count,
+                "server_errors":values.get("server_errors",0),"client_errors":values.get("client_errors",0),
+                "rate_limited":values.get("rate_limited",0),"slow_requests":values.get("slow_requests",0),
+                "mean_duration_ms":round(values.get("duration_ms",0)/max(count,1),1),
+                "scope":"process-local"}
+
     @app.get("/health")
     def health():
         return {"status": "ok"}
@@ -70,12 +105,19 @@ def create_app(settings=None, engine=None):
         with engine.connect() as connection:
             connection.execute(select(Occurrence.id).limit(1))
             connection.execute(select(NativeTicket.occurrence_id).limit(1))
+            connection.execute(select(SupplierCheck.id).limit(1))
+            connection.execute(select(OperationalPolicy.organization).limit(1))
+            connection.execute(select(FinancialReview.occurrence_id).limit(1))
+            connection.execute(select(UnitReference.id).limit(1))
             if settings.firebase_project_id:
                 connection.execute(select(Store.id).limit(1))
                 connection.execute(select(AccessRequest.id).limit(1))
                 connection.execute(select(FirebaseMembership.id).limit(1))
         return {"status": "ready"}
 
+    app.include_router(units.router)
+    app.include_router(policies.router)
+    app.include_router(supplier_checks.router)
     app.include_router(catalog.router)
     app.include_router(stores.router)
     app.include_router(tickets.router)

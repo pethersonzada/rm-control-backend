@@ -219,3 +219,97 @@ class CatalogAudit(Base):
     previous: Mapped[dict | None] = mapped_column(JSON)
     current: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierCheck(Base):
+    __tablename__ = "rm_supplier_checks"
+    __table_args__ = (
+        UniqueConstraint("organization", "created_by", "request_key", name="uq_rm_supplier_check_request"),
+        Index("ix_rm_supplier_checks_scope", "organization", "store", "checked_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    store: Mapped[str] = mapped_column(String(200))
+    supplier_code: Mapped[str | None] = mapped_column(String(80))
+    supplier_name: Mapped[str] = mapped_column(String(200))
+    checker: Mapped[str] = mapped_column(String(200))
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str | None] = mapped_column(String(120))
+    notes: Mapped[str | None] = mapped_column(String(1000))
+    active: Mapped[bool] = mapped_column(Boolean)
+    revision: Mapped[int] = mapped_column(Integer)
+    created_by: Mapped[str] = mapped_column(String(80))
+    request_key: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierCheckAudit(Base):
+    __tablename__ = "rm_supplier_check_audit"
+    __table_args__ = (Index("ix_rm_supplier_check_audit_check", "check_id", "id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    check_id: Mapped[int] = mapped_column(ForeignKey("rm_supplier_checks.id"))
+    actor: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(40))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OperationalPolicy(Base):
+    __tablename__ = "rm_operational_policies"
+    organization: Mapped[str] = mapped_column(String(80), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean)
+    days: Mapped[int] = mapped_column(Integer)
+    start_field: Mapped[str] = mapped_column(String(30))
+    timezone: Mapped[str] = mapped_column(String(80))
+    holidays: Mapped[list[str]] = mapped_column(JSON)
+    reference: Mapped[str] = mapped_column(String(500))
+    revision: Mapped[int] = mapped_column(Integer)
+
+
+class OperationalPolicyAudit(Base):
+    __tablename__ = "rm_operational_policy_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FinancialReview(Base):
+    __tablename__ = "rm_financial_reviews"
+    occurrence_id: Mapped[int] = mapped_column(ForeignKey("rm_occurrences.id"), primary_key=True)
+    approved: Mapped[Decimal | None] = mapped_column(ExactDecimal())
+    recovered: Mapped[Decimal | None] = mapped_column(ExactDecimal())
+    pending: Mapped[Decimal | None] = mapped_column(ExactDecimal())
+    reference: Mapped[str] = mapped_column(String(500))
+    revision: Mapped[int] = mapped_column(Integer)
+
+
+class UnitReference(Base):
+    __tablename__ = "rm_unit_references"
+    __table_args__ = (UniqueConstraint("organization","code","package",name="uq_rm_unit_reference"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(40))
+    package: Mapped[str] = mapped_column(String(80))
+    base_unit: Mapped[str] = mapped_column(String(80))
+    factor: Mapped[Decimal] = mapped_column(ExactDecimal())
+    reference: Mapped[str] = mapped_column(String(500))
+    active: Mapped[bool] = mapped_column(Boolean)
+    revision: Mapped[int] = mapped_column(Integer)
+
+
+class UnitReferenceAudit(Base):
+    __tablename__ = "rm_unit_reference_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(40))
+    package: Mapped[str] = mapped_column(String(80))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),server_default=func.now())
