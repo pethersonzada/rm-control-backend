@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Identity, ROLES, store_key
-from app.models import FirebaseMembership
+from app.models import FirebaseMembership, Store
 
 _CERT_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
 _lock = threading.Lock()
@@ -87,7 +87,11 @@ def membership(engine, project, uid):
             not isinstance(s, str) or s == "*" or not 1 <= len(store_key(s)) <= 200 for s in stores
         ):
             return None
+        inactive = set(session.scalars(select(Store.code).where(Store.organization == member.organization, Store.active.is_(False))))
+        allowed = frozenset(map(store_key, stores)) - inactive
+        if not allowed and not member.can_delegate_admin:
+            return None
         return Identity(
-            member.subject, member.organization, member.role, frozenset(map(store_key, stores)),
+            member.subject, member.organization, member.role, allowed,
             project, uid, member.can_delegate_admin,
         )

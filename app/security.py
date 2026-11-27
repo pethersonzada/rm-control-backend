@@ -62,6 +62,8 @@ def authenticate(request: Request) -> Identity:
             raise HTTPException(401, "Credencial Firebase inválida.", headers={"WWW-Authenticate": "Bearer"}) from None
         except (FirebaseUnavailable, SQLAlchemyError):
             raise HTTPException(503, "Autenticação temporariamente indisponível.") from None
+        if principal is None and request.method == "POST" and request.url.path == "/access/request":
+            return Identity("pending", "", "viewer", frozenset(), settings.firebase_project_id, uid)
         if principal is None:
             raise HTTPException(403, "Conta sem autorização para acessar o RM Control.",
                                 headers={"X-RM-Account-Denied": "1"})
@@ -92,6 +94,7 @@ class RequestLimits:
         "/imports/workbook": 21_010_000,
         "/imports/confirm": 12_000_000,
         "/inventory/reconcile": 2_000_000,
+        "/tickets": 2_000_000,
     }
 
     def __init__(self, app):
@@ -117,10 +120,10 @@ class RequestLimits:
             principal = await run_in_threadpool(authenticate, request)
             if path.startswith("/admin/") and (principal.role != "admin" or not principal.firebase_uid):
                 raise HTTPException(403, "Acesso administrativo restrito.")
-            if path.startswith("/imports/") or request.method == "PATCH":
+            if path.startswith("/imports/") or (path.startswith("/tickets") and request.method in {"POST", "PUT"}) or request.method == "PATCH":
                 can_write(principal)
             request.state.principal = principal
-            limit = self.limits.get(path, 16384)
+            limit = self.limits.get(path, 2_000_000 if path.startswith('/tickets/') and request.method == 'PUT' else 16384)
             if request.app.state.settings.mode == "operational" and path == "/imports/spreadsheet":
                 limit = 1_000_000
             if int(request.headers.get("content-length", "0")) > limit:

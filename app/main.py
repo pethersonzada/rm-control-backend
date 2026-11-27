@@ -10,8 +10,8 @@ from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 from app.config import load_settings
 from app.database import connect
-from app.models import FirebaseMembership, Occurrence
-from app.routers import admin, imports, operations
+from app.models import AccessRequest, FirebaseMembership, NativeTicket, Occurrence, Store
+from app.routers import admin, imports, operations, stores, tickets
 from app.security import RateLimiter, RequestLimits
 
 logger = logging.getLogger("rm_control")
@@ -69,10 +69,15 @@ def create_app(settings=None, engine=None):
             raise HTTPException(503, "Ambiente operacional indisponível.")
         with engine.connect() as connection:
             connection.execute(select(Occurrence.id).limit(1))
+            connection.execute(select(NativeTicket.occurrence_id).limit(1))
             if settings.firebase_project_id:
+                connection.execute(select(Store.id).limit(1))
+                connection.execute(select(AccessRequest.id).limit(1))
                 connection.execute(select(FirebaseMembership.id).limit(1))
         return {"status": "ready"}
 
+    app.include_router(stores.router)
+    app.include_router(tickets.router)
     app.include_router(admin.router)
     app.include_router(operations.router)
     app.include_router(imports.router)

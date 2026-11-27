@@ -7,7 +7,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.config import Identity, store_key
-from app.models import AuditEvent, ImportBatch, Occurrence, OccurrenceInvoice, OccurrenceItem
+from app.models import AuditEvent, ImportBatch, NativeTicket, Occurrence, OccurrenceInvoice, OccurrenceItem
 from app.schemas import Record
 
 
@@ -39,6 +39,7 @@ def page(session: Session, principal: Identity, limit: int, cursor: int, filters
         query = query.where(or_(
             *(func.lower(field).contains(search, autoescape=True) for field in
               (Occurrence.code, Occurrence.load, Occurrence.reason, Occurrence.destination)),
+            Occurrence.id.in_(select(NativeTicket.occurrence_id).where(NativeTicket.external_code.contains(search, autoescape=True))),
             Occurrence.items.any(or_(
                 OccurrenceItem.code.contains(search, autoescape=True),
                 func.lower(OccurrenceItem.description).contains(search, autoescape=True),
@@ -59,6 +60,10 @@ def page(session: Session, principal: Identity, limit: int, cursor: int, filters
             query = query.where(comparator > position if ascending else comparator < position)
     results = session.scalars(query.limit(limit + 1)).all()
     records = [serialize(row).model_dump(mode="json") for row in results[:limit]]
+    native = {row.occurrence_id: row for row in session.scalars(select(NativeTicket).where(NativeTicket.occurrence_id.in_([row.id for row in results[:limit]])))}
+    for row, record in zip(results[:limit], records):
+        if row.id in native:
+            record.update(external_code=native[row.id].external_code, revision=native[row.id].revision)
     if calendar:
         from app.services.deadlines import deadline
         for record in records:
