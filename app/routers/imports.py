@@ -1,4 +1,5 @@
 from typing import Annotated
+import json
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 
@@ -28,7 +29,7 @@ def preview(body: Paste, principal: Writer, request: Request, engine=Depends(dat
 def spreadsheet_legacy(body: Spreadsheet, principal: Writer, request: Request, engine=Depends(database)):
     with request.app.state.limiter.import_slot():
         try:
-            result = spreadsheet.parse_workbook(body.content_base64, body.sheet, body.skip_invalid)
+            result = spreadsheet.parse_workbook(body.content_base64, body.sheet, body.skip_invalid, body.mapping)
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
     return import_preview.compare_preview(engine, principal, imports.check_preview(principal, result))
@@ -40,6 +41,7 @@ def workbook(
     sheet: Annotated[str | None, Form(max_length=31)] = None,
     skip_invalid: Annotated[bool, Form()] = False,
     engine=Depends(database),
+    mapping: Annotated[str | None, Form(max_length=8000)] = None,
 ):
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(422, "Selecione um arquivo XLSX.")
@@ -47,7 +49,7 @@ def workbook(
         raise HTTPException(413, "O arquivo deve ter até 21 MB.")
     with request.app.state.limiter.import_slot():
         try:
-            result = spreadsheet.parse_file(file.file, sheet or None, skip_invalid)
+            result = spreadsheet.parse_file(file.file, sheet or None, skip_invalid, json.loads(mapping) if mapping else None)
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
     return imports.check_preview(principal, result)
