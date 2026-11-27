@@ -46,7 +46,7 @@ class Record(BaseModel):
     bdv: str | None = Field(default=None, max_length=40)
     is_test: bool | None = None
     invoices: list[Invoice] = Field(default_factory=list, max_length=10000)
-    source: Literal["clipboard", "spreadsheet"] = "clipboard"
+    source: Literal["clipboard", "spreadsheet", "native"] = "clipboard"
     items: list[Item] = Field(default_factory=list, max_length=10000)
 
     @field_validator("destination")
