@@ -11,7 +11,7 @@ from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 from app.config import load_settings
 from app.database import connect
 from app.models import AccessRequest, FirebaseMembership, NativeTicket, Occurrence, Store
-from app.routers import admin, imports, operations, stores, tickets
+from app.routers import admin, catalog, imports, operations, stores, tickets
 from app.security import RateLimiter, RequestLimits
 
 logger = logging.getLogger("rm_control")
@@ -76,6 +76,7 @@ def create_app(settings=None, engine=None):
                 connection.execute(select(FirebaseMembership.id).limit(1))
         return {"status": "ready"}
 
+    app.include_router(catalog.router)
     app.include_router(stores.router)
     app.include_router(tickets.router)
     app.include_router(admin.router)

@@ -95,6 +95,7 @@ class RequestLimits:
         "/imports/confirm": 12_000_000,
         "/inventory/reconcile": 2_000_000,
         "/tickets": 2_000_000,
+        "/admin/catalog/batch": 2_000_000,
     }
 
     def __init__(self, app):
