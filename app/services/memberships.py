@@ -1,11 +1,12 @@
 import hashlib
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.config import store_key
-from app.models import FirebaseMembership, MembershipAudit
+from app.models import AccessRequest, FirebaseMembership, MembershipAudit, Store
 from app.repositories.occurrences import transaction
 
 
@@ -73,6 +74,9 @@ def save_member(engine, principal, data):
                 or not stores <= set(actor.stores)
                 or (data.role == "admin" and not actor.can_delegate_admin)):
             raise HTTPException(403, "Alteração fora das permissões administrativas.")
+        inactive = set(session.scalars(select(Store.code).where(Store.organization == principal.organization, Store.active.is_(False))))
+        if stores & inactive:
+            raise HTTPException(403, "Loja desativada.")
         member = session.scalar(scoped.where(FirebaseMembership.uid == data.uid))
         before = snapshot(member) if member else None
         if member:
@@ -89,4 +93,7 @@ def save_member(engine, principal, data):
         member.role, member.stores, member.active = data.role, sorted(stores), data.active
         if before != snapshot(member):
             audit(session, member, actor.subject, "membership.update" if before else "membership.create", before)
+        request = session.scalar(select(AccessRequest).filter_by(project_id=project, organization=principal.organization, uid=data.uid))
+        if request and data.active:
+            request.status, request.reviewer, request.reviewed_at = "approved", actor.subject, datetime.now(timezone.utc)
         return snapshot(member)
