@@ -112,15 +112,18 @@ def select_sheet(workbook, name, mapping=None):
     for worksheet in candidates:
         for index, row in enumerate(worksheet.iter_rows(max_row=30, max_col=MAX_COLUMNS, values_only=True), 1):
             headers = {}
+            found_aliases = set()
             duplicates = set()
             for column, cell in enumerate(row):
                 label = normalize(cell)
+                if label in aliases:
+                    found_aliases.add(label)
                 label = aliases.get(label, label)
                 if label in SUPPORTED:
                     if label in headers:
                         duplicates.add(label)
                     headers[label] = column
-            if REQUIRED <= headers.keys():
+            if REQUIRED <= headers.keys() and found_aliases == set(aliases):
                 if duplicates:
                     raise ValueError("Cabeçalhos repetidos na aba selecionada.")
                 compatible.append((worksheet, index, headers))
