@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Reque
 from app import parser, spreadsheet
 from app.config import Identity
 from app.database import database
-from app.schemas import Paste, Record, Spreadsheet
+from app.schemas import ImportRecord, Paste, Spreadsheet
 from app.security import writer
 from app.services import imports, import_preview
 
@@ -57,7 +57,7 @@ def workbook(
 
 @router.post("/confirm")
 def confirm(
-    records: list[Record], principal: Writer, request: Request, engine=Depends(database),
+    records: list[ImportRecord], principal: Writer, request: Request, engine=Depends(database),
     idempotency_key: Annotated[str | None, Header(pattern=r"^[a-zA-Z0-9_-]{1,64}$")] = None,
 ):
     with request.app.state.limiter.import_slot():
