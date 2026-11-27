@@ -107,7 +107,10 @@ def parse_list(text: str):
 
 
 def parse(text: str, target_code: str | None = None, seed=None):
-    tabular = parse_tabular(text)
+    try:
+        tabular = parse_tabular(text)
+    except csv.Error:
+        return {"records": [], "warnings": ["Tabela copiada inválida ou campo excessivo."], "blocked": True}
     if tabular is not None:
         return tabular
     result = parse_list(text)
