@@ -65,8 +65,8 @@ def change_status(
 
 
 @router.get("/summary")
-def summary(principal: Principal, engine: Database):
-    return operations.totals(engine, principal)
+def summary(principal: Principal, engine: Database, request: Request):
+    return operations.totals(engine, principal, request.app.state.settings.calendars.get(principal.organization))
 
 
 @router.post("/inventory/reconcile")
