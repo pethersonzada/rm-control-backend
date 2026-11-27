@@ -147,3 +147,50 @@ class MembershipAudit(Base):
     previous: Mapped[dict | None] = mapped_column(JSON)
     current: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Store(Base):
+    __tablename__ = "rm_stores"
+    __table_args__ = (UniqueConstraint("organization", "code", name="uq_rm_store_code"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(200))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class StoreAudit(Base):
+    __tablename__ = "rm_store_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    store_code: Mapped[str] = mapped_column(String(200))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AccessRequest(Base):
+    __tablename__ = "rm_access_requests"
+    __table_args__ = (
+        UniqueConstraint("project_id", "uid", name="uq_rm_access_request_uid"),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="ck_rm_access_request_status"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(100))
+    uid: Mapped[str] = mapped_column(String(128))
+    organization: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(20))
+    reviewer: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NativeTicket(Base):
+    __tablename__ = "rm_native_tickets"
+    __table_args__ = (UniqueConstraint("organization", "store", "external_code", name="uq_rm_native_external"),)
+    occurrence_id: Mapped[int] = mapped_column(ForeignKey("rm_occurrences.id"), primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    store: Mapped[str] = mapped_column(String(200))
+    external_code: Mapped[str | None] = mapped_column(String(40))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
