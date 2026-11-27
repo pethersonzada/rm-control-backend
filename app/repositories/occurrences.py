@@ -148,8 +148,8 @@ def merge(row: Occurrence, record: Record):
             invoices.add(key)
 
 
-def audit(session: Session, principal: Identity, row: Occurrence, action: str, previous_status: str | None):
+def audit(session: Session, principal: Identity, row: Occurrence, action: str, previous_status: str | None, details=None):
     session.add(AuditEvent(
         organization=principal.organization, store=row.store, subject=principal.subject,
-        action=action, occurrence_id=row.id, previous_status=previous_status, next_status=row.status,
+        action=action, occurrence_id=row.id, previous_status=previous_status, next_status=row.status, details=details,
     ))
