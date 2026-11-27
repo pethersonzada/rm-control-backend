@@ -4,6 +4,7 @@ import io
 import re
 import unicodedata
 import zipfile
+from app.config import store_key
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from time import monotonic
@@ -67,12 +68,12 @@ def amount(value):
     return str(result)
 
 
-def parse_workbook(content_base64, sheet=None, skip_invalid=False):
+def parse_workbook(content_base64, sheet=None, skip_invalid=False, mapping=None):
     try:
         data = base64.b64decode(content_base64, validate=True)
     except (binascii.Error, ValueError) as error:
         raise ValueError("Arquivo XLSX inválido.") from error
-    return parse_file(io.BytesIO(data), sheet, skip_invalid)
+    return parse_file(io.BytesIO(data), sheet, skip_invalid, mapping)
 
 
 def validate_archive(file):
@@ -95,7 +96,13 @@ def validate_archive(file):
     file.seek(0)
 
 
-def select_sheet(workbook, name):
+def select_sheet(workbook, name, mapping=None):
+    mapping = mapping or {}
+    if not isinstance(mapping, dict) or len(mapping) > len(SUPPORTED) or any(not isinstance(k, str) or not isinstance(v, str) or not 1 <= len(v.strip()) <= 200 or normalize(k) not in SUPPORTED for k, v in mapping.items()):
+        raise ValueError("Mapeamento de cabeçalhos inválido.")
+    aliases = {normalize(v): normalize(k) for k, v in mapping.items()}
+    if len(aliases) != len(mapping) or len(set(aliases.values())) != len(mapping):
+        raise ValueError("Mapeamento contém colunas repetidas.")
     if name and name not in workbook.sheetnames:
         raise ValueError("Aba não encontrada.")
     candidates = [workbook[name]] if name else workbook.worksheets
@@ -108,6 +115,7 @@ def select_sheet(workbook, name):
             duplicates = set()
             for column, cell in enumerate(row):
                 label = normalize(cell)
+                label = aliases.get(label, label)
                 if label in SUPPORTED:
                     if label in headers:
                         duplicates.add(label)
@@ -128,14 +136,17 @@ def parse_rows(workbook, worksheet, start, headers, skip_invalid, deadline):
     records, item_keys = {}, {}
     warnings = []
     rejected = set()
+    unscoped_rejected = set()
     counts = {"rows": 0, "invalid_rows": 0, "rows_without_value": 0}
     valid_rows = {}
     def warn(row, reason, code=None):
         counts["invalid_rows"] += 1
         if len(warnings) < MAX_WARNINGS:
             warnings.append(f"Linha {row}: {reason}.")
-        if code:
+        if isinstance(code, tuple):
             rejected.add(code)
+        elif code:
+            unscoped_rejected.add(code)
 
     worksheet.reset_dimensions()
     iterator = worksheet.iter_rows(min_row=start + 1, max_col=max(headers.values()) + 1, values_only=True)
@@ -153,13 +164,14 @@ def parse_rows(workbook, worksheet, start, headers, skip_invalid, deadline):
             return row[index] if index is not None else None
 
         code, plu = identifier(value("N° CHAMADO")), identifier(value("PLU"))
-        if not re.fullmatch(r"[0-9]{1,40}", code) or not re.fullmatch(r"[0-9]{1,40}", plu):
-            warn(row_number, "chamado ou PLU ausente ou inválido", code)
-            continue
         destination = identifier(value("LOJA"))
+        key = (store_key(destination), code) if destination and code else code
+        if not re.fullmatch(r"[0-9]{1,40}", code) or not re.fullmatch(r"[0-9]{1,40}", plu):
+            warn(row_number, "chamado ou PLU ausente ou inválido", key)
+            continue
         reason = normalize(value("TIPO DA DIVERGENCIA"))
         if not destination or not reason:
-            warn(row_number, "loja ou tipo de divergência ausente", code)
+            warn(row_number, "loja ou tipo de divergência ausente", key)
             continue
         try:
             quantity = amount(value("QTD DIVERGENTE"))
@@ -168,7 +180,7 @@ def parse_rows(workbook, worksheet, start, headers, skip_invalid, deadline):
             received = day(value("DATA RECEBIMENTO"), workbook.epoch)
             returned = day(value("DATA RETORNO CD"), workbook.epoch)
         except (InvalidOperation, ValueError, TypeError, OverflowError):
-            warn(row_number, "data, quantidade ou valor inválido ou sem valor em cache", code)
+            warn(row_number, "data, quantidade ou valor inválido ou sem valor em cache", key)
             continue
         package = identifier(value("VOLUME")) or "NÃO INFORMADO"
         item_id = (plu, package)
@@ -177,30 +189,31 @@ def parse_rows(workbook, worksheet, start, headers, skip_invalid, deadline):
             bdv=identifier(value("N° BDV")) or None, reason=reason, received_at=received, returned_at=returned,
             status=normalize(value("SITUACAO DO CHAMADO")) or "DESCONHECIDO", source="spreadsheet",
         )
-        if code in records:
-            if any(records[code][field] != content for field, content in metadata.items()):
-                warn(row_number, "informações conflitantes no mesmo chamado", code)
+        if key in records:
+            if any(records[key][field] != content for field, content in metadata.items()):
+                warn(row_number, "informações conflitantes no mesmo chamado", key)
                 continue
-            if item_id in item_keys[code]:
-                warn(row_number, "PLU e embalagem repetidos", code)
+            if item_id in item_keys[key]:
+                warn(row_number, "PLU e embalagem repetidos", key)
                 continue
         else:
-            records[code] = {**metadata, "items": []}
-            item_keys[code] = set()
-        item_keys[code].add(item_id)
-        valid_rows[code] = valid_rows.get(code, 0) + 1
+            records[key] = {**metadata, "items": []}
+            item_keys[key] = set()
+        item_keys[key].add(item_id)
+        valid_rows[key] = valid_rows.get(key, 0) + 1
         if total is None:
             counts["rows_without_value"] += 1
-        records[code]["items"].append(dict(
+        records[key]["items"].append(dict(
             code=plu, description=identifier(value("DESCRICAO PRODUTO")), quantity=quantity, package=package,
             total=total, category=identifier(value("CATEGORIA")) or None,
         ))
     blocked = counts["invalid_rows"] > 0
     counts["omitted_rows"] = 0
     if skip_invalid and blocked:
-        for code in rejected:
-            records.pop(code, None)
-        counts["omitted_rows"] = counts["invalid_rows"] + sum(valid_rows.get(code, 0) for code in rejected)
+        rejected.update(key for key in records if key[1] in unscoped_rejected)
+        for key in rejected:
+            records.pop(key, None)
+        counts["omitted_rows"] = counts["invalid_rows"] + sum(valid_rows.get(key, 0) for key in rejected)
         warnings.append("Importação parcial: linhas inválidas e chamados afetados foram excluídos.")
         blocked = False
     if counts["invalid_rows"] > MAX_WARNINGS:
@@ -213,13 +226,13 @@ def parse_rows(workbook, worksheet, start, headers, skip_invalid, deadline):
             "sheet": worksheet.title}
 
 
-def parse_file(file, sheet=None, skip_invalid=False):
+def parse_file(file, sheet=None, skip_invalid=False, mapping=None):
     try:
         validate_archive(file)
         deadline = monotonic() + DURATION_LIMIT
         workbook = load_workbook(file, read_only=True, data_only=True, keep_links=False)
         try:
-            return parse_rows(workbook, *select_sheet(workbook, sheet), skip_invalid, deadline)
+            return parse_rows(workbook, *select_sheet(workbook, sheet, mapping), skip_invalid, deadline)
         finally:
             workbook.close()
     except (zipfile.BadZipFile, OSError, KeyError, TypeError, ParseError, DefusedXmlException, InvalidFileException) as error:
