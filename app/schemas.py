@@ -57,15 +57,21 @@ class Record(BaseModel):
         return value
 
 
+class ImportRecord(Record):
+    expected_snapshot: str | None = Field(default=None, pattern=r"^(absent|[a-f0-9]{64})$")
+
+
 class Paste(BaseModel):
     text: str = Field(min_length=1, max_length=2_000_000)
     target_code: Identifier | None = None
+    target_store: str | None = Field(default=None, max_length=200)
 
 
 class Spreadsheet(BaseModel):
     content_base64: str = Field(min_length=1, max_length=28_000_000)
     sheet: str | None = Field(default=None, max_length=31)
     skip_invalid: bool = False
+    mapping: dict[str, str] | None = None
 
 
 class InventoryItem(BaseModel):

@@ -53,3 +53,21 @@ A suíte usa dados sintéticos e executa SQLite. Defina `RM_TEST_POSTGRES_URL` p
 Software proprietário. Consulte [LICENSE](LICENSE).
 
 A homologação autenticada usa Firebase, Render e Neon. Consulte [Firebase na homologação](docs/firebase-homologacao.md) para provisionamento, permissões e validação.
+
+
+## Gestão de lojas e chamados
+
+- A conta Firebase permanece bloqueada até vínculo ativo. `POST /access/request` aceita somente um ID token válido e registra solicitação idempotente; não concede permissão. O responsável da organização lista pendências em `GET /admin/access-requests`, rejeita em `POST /admin/access-requests/{uid}/reject` ou autoriza em `PUT /admin/users`. A fila automática é limitada a um projeto Firebase associado a uma organização proprietária; múltiplas organizações exigem seleção/invitação explícita futuramente.
+- `GET /stores` lista lojas acessíveis. `PUT /admin/stores` cadastra/edita/desativa por código numérico; apenas o administrador inicial com autoridade de organização pode gerenciar lojas. A desativação bloqueia novas operações e conserva histórico. Códigos antigos são migrados com nome provisório.
+- `POST /tickets` abre chamado nativo em estado PENDENTE com `Idempotency-Key` obrigatória, loja, data de recebimento ISO, motivo, produtos e notas. O identificador RM é interno, independente do número oficial externo opcional. `PUT /tickets/{code}` edita campos do formulário com revisão esperada, mantendo status e datas de ciclo de vida.
+- `GET /occurrences/{code}/history?store=…` fornece histórico paginado por cursor, com identidade auditada, mudança de status e campos alterados em edições nativas. Eventos antigos podem não conter detalhes.
+- `GET /reports/chamados.xlsx` exporta os filtros da listagem (até 20 mil linhas por arquivo). IDs, PLUs e notas são textos para preservar zeros; valores superiores à precisão do Excel são textos exatos. Datas conhecidas são formatadas, valores ausentes ficam em branco e textos não são executados como fórmulas. O relatório é um snapshot, não sincronização automática de um arquivo externo. O layout é provisório até comparação com modelo autorizado.
+- A abertura é interna ao RM Control; não envia chamados oficiais ao D-Supply.
+
+## Prévia e mapeamento
+
+A prévia de importação compara registros com o banco sem gravar ocorrências. `comparison` contém contagens `new`, `updated`, `unchanged` e `conflicts`; `classifications` identifica cada chamado por código e loja. Conflitos impedem confirmação. A comparação é informativa; a confirmação revalida autorização, chave de idempotência, duplicidades e conflitos em transação. Não substitui o controle de revisão do formulário nativo. Importação permanece parcial e não remove itens existentes.
+
+O clipboard aceita o formato sintético D-Supply documentado e TSV com cabeçalhos explícitos da consolidação. Para colar somente o modal Editar de um chamado já importado, informe `target_code` e, se houver mais de uma loja com o código, `target_store`. A carga, loja, origem e motivo devem corresponder. Não cole credenciais, observações pessoais ou telas não autorizadas.
+
+Para XLSX com cabeçalhos diferentes, informe a aba e o campo multipart opcional `mapping` (JSON). Exemplo sintético: `{"LOJA":"Unidade","PLU":"Código produto","N° CHAMADO":"Ticket"}`. Chaves representam campos canônicos; valores representam títulos exatos da planilha. O mapeamento deve ser unívoco. Não há adivinhação de posições. A análise é limitada e síncrona, com cancelamento do cliente; o servidor pode continuar até o limite de processamento. Não há worker persistente contratado.

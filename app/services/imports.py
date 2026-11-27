@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from app.config import store_key
 from app.models import NativeTicket
 from app.services.memberships import lock_organization
+from app.services.import_preview import fingerprint
 from sqlalchemy import select
 from app.repositories import occurrences
 from app.schemas import Record
@@ -17,6 +18,8 @@ def check_preview(principal, result):
     records = []
     warnings = result["warnings"]
     blocked = result.get("blocked", False)
+    if len(result["records"]) > 10000:
+        raise HTTPException(422, "Prévia limitada a 10 mil chamados. Divida a origem em lotes menores.")
     for index, data in enumerate(result["records"], 1):
         try:
             record = Record.model_validate(data)
@@ -38,10 +41,10 @@ def confirm(engine, principal, records, key=None):
         if record.source == "native":
             raise HTTPException(422, "Use a abertura nativa de chamados.")
         item_keys = {(item.code, item.package) for item in record.items}
-        if len(item_keys) != len(record.items):
-            raise HTTPException(422, "Itens duplicados no mesmo chamado.")
+        if len(item_keys) != len(record.items) or len({(invoice.number, invoice.series) for invoice in record.invoices}) != len(record.invoices):
+            raise HTTPException(422, "Itens ou notas fiscais duplicados no mesmo chamado.")
     ordered = sorted(records, key=lambda record: (store_key(record.destination), record.code))
-    payload = json.dumps([record.model_dump(mode="json") for record in ordered], separators=(",", ":"), sort_keys=True)
+    payload = json.dumps([record.model_dump(mode="json", exclude={"expected_snapshot"} if getattr(record, "expected_snapshot", None) is None else set()) for record in ordered], separators=(",", ":"), sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     with occurrences.transaction(engine) as session:
         lock_organization(session, "tickets", principal.organization)
@@ -52,7 +55,13 @@ def confirm(engine, principal, records, key=None):
                 if existing.digest != digest:
                     raise HTTPException(409, "Chave de idempotência já usada em outro lote.")
                 return {"saved": existing.count, "replayed": True}
-        for record in ordered:
+        for incoming in ordered:
+            expected = getattr(incoming, "expected_snapshot", None)
+            record = Record.model_validate(incoming.model_dump(exclude={"expected_snapshot"}))
+            if expected is not None:
+                known = occurrences.locked(session, principal, store_key(record.destination), record.code)
+                if fingerprint(occurrences.serialize(known) if known else None) != expected:
+                    raise HTTPException(409, "Chamado mudou depois da prévia. Analise os dados novamente.")
             if session.scalar(select(NativeTicket.occurrence_id).where(
                 NativeTicket.organization == principal.organization,
                 NativeTicket.store == store_key(record.destination),

@@ -110,6 +110,7 @@ class AuditEvent(Base):
     occurrence_id: Mapped[int] = mapped_column(ForeignKey("rm_occurrences.id"))
     previous_status: Mapped[str | None] = mapped_column(String(80))
     next_status: Mapped[str | None] = mapped_column(String(80))
+    details: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -194,3 +195,27 @@ class NativeTicket(Base):
     store: Mapped[str] = mapped_column(String(200))
     external_code: Mapped[str | None] = mapped_column(String(40))
     revision: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class CatalogProduct(Base):
+    __tablename__ = "rm_catalog_products"
+    __table_args__ = (UniqueConstraint("organization", "code", name="uq_rm_catalog_product"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(40))
+    description: Mapped[str] = mapped_column(String(500))
+    category: Mapped[str | None] = mapped_column(String(200))
+    package: Mapped[str | None] = mapped_column(String(80))
+    reference: Mapped[str] = mapped_column(String(200))
+    active: Mapped[bool] = mapped_column(Boolean)
+
+
+class CatalogAudit(Base):
+    __tablename__ = "rm_catalog_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(40))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

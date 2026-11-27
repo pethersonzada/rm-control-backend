@@ -15,3 +15,10 @@
 - Administração de vínculos com escopo por organização e loja, desativação e auditoria.
 - Migração 0002 e procedimento auditado de primeiro administrador.
 - Limite de leitura XLSX simultânea para o Render Free.
+
+## Em desenvolvimento
+
+- Migrações 0003/0004: lojas, solicitações, chamados nativos e detalhes de auditoria.
+- Abertura/edição com revisão, exportação XLSX filtrada e histórico.
+- Comparação de prévia com banco, TSV explícito, detalhes avulsos e mapeamento de cabeçalhos XLSX.
+- Pendências externas: validar formato real da origem, modelo Excel/WPS, regras financeiras, catálogo de unidades e publicação autenticada.
