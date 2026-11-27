@@ -58,7 +58,7 @@ def bootstrap(engine, project, organization, uid, stores):
 def list_members(engine, principal):
     with Session(engine) as session:
         rows = session.scalars(org_members(principal.firebase_project, principal.organization).order_by(FirebaseMembership.id))
-        return [snapshot(row) for row in rows if set(row.stores) <= principal.stores]
+        return [snapshot(row) for row in rows if principal.can_delegate_admin or set(row.stores) <= principal.stores]
 
 
 def save_member(engine, principal, data):
