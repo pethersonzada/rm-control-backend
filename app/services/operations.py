@@ -21,7 +21,7 @@ def normalized(value):
     ).split())
 
 
-def totals(engine, principal):
+def totals(engine, principal, calendar=None):
     columns = (OccurrenceItem.total, Occurrence.reason)
     scoped = (
         Occurrence.organization == principal.organization, Occurrence.store.in_(principal.stores),
@@ -30,6 +30,8 @@ def totals(engine, principal):
     result = {reason: Decimal("0") for reason in ("FALTA", "SOBRA", "AVARIA")}
     missing = 0
     signed = False
+    unknown_reason = 0
+    deadlines = None
     with Session(engine) as session:
         query = select(*columns).join(Occurrence).where(*scoped).execution_options(yield_per=500)
         for value, reason in session.execute(query):
@@ -38,16 +40,32 @@ def totals(engine, principal):
             elif normalized(reason) in result:
                 result[normalized(reason)] += value
                 signed |= value < 0
+            else:
+                unknown_reason += 1
         status_counts = dict(session.execute(
             select(Occurrence.status, func.count()).where(*scoped).group_by(Occurrence.status)
         ).all())
         count = sum(status_counts.values())
+        if calendar:
+            from app.services.deadlines import deadline
+            from datetime import datetime
+            today = datetime.now(calendar.timezone).date()
+            deadlines = {"within": 0, "overdue": 0, "missing_date": 0}
+            field = getattr(Occurrence, calendar.start_field)
+            for status, value in session.execute(select(Occurrence.status, field).where(*scoped).execution_options(yield_per=500)):
+                if normalized(status) not in PENDING:
+                    continue
+                due = deadline({calendar.start_field: value}, calendar, today)
+                key = "missing_date" if not due else "overdue" if due["deadline_passed"] else "within"
+                deadlines[key] += 1
     return {
         "occurrences": count, "items_without_value": missing, "status_counts": status_counts,
+        "items_unknown_reason": unknown_reason, "deadline_counts": deadlines,
         "totals_by_reason": {reason: format(value, "f") for reason, value in result.items()},
-        "net_reported": None if signed else format(result["SOBRA"] - result["FALTA"] - result["AVARIA"], "f"),
+        "net_reported": None if signed or unknown_reason else format(result["SOBRA"] - result["FALTA"] - result["AVARIA"], "f"),
         "approved": None, "recovered": None, "pending": None,
         "note": ("Saldo indisponível enquanto houver valores informados com sinais que precisam de validação. " if signed else "")
+                + ("Há valores com motivo não classificado; o saldo não foi calculado. " if unknown_reason else "")
                 + "Aprovação, recuperação e saldo pendente exigem lançamentos financeiros validados.",
     }
 
