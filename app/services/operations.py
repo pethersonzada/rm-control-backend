@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import store_key
-from app.models import Occurrence, OccurrenceItem
+from app.models import FinancialReview, Occurrence, OccurrenceItem
 from app.parser import STATUSES
 from app.repositories import occurrences
 from app.security import require_store
@@ -32,6 +32,8 @@ def totals(engine, principal, calendar=None):
     signed = False
     unknown_reason = 0
     deadlines = None
+    financial = {key: None for key in ("approved", "recovered", "pending")}
+    financial_counts = {key: 0 for key in financial}
     with Session(engine) as session:
         query = select(*columns).join(Occurrence).where(*scoped).execution_options(yield_per=500)
         for value, reason in session.execute(query):
@@ -46,6 +48,12 @@ def totals(engine, principal, calendar=None):
             select(Occurrence.status, func.count()).where(*scoped).group_by(Occurrence.status)
         ).all())
         count = sum(status_counts.values())
+        for review in session.scalars(select(FinancialReview).join(Occurrence).where(*scoped).execution_options(yield_per=500)):
+            for key in financial:
+                value = getattr(review,key)
+                if value is not None:
+                    financial[key] = (financial[key] or Decimal("0")) + value
+                    financial_counts[key] += 1
         if calendar:
             from app.services.deadlines import deadline
             from datetime import datetime
@@ -63,10 +71,11 @@ def totals(engine, principal, calendar=None):
         "items_unknown_reason": unknown_reason, "deadline_counts": deadlines,
         "totals_by_reason": {reason: format(value, "f") for reason, value in result.items()},
         "net_reported": None if signed or unknown_reason else format(result["SOBRA"] - result["FALTA"] - result["AVARIA"], "f"),
-        "approved": None, "recovered": None, "pending": None,
+        **{key: format(value,"f") if value is not None else None for key,value in financial.items()},
+        "financial_counts": financial_counts,
         "note": ("Saldo indisponível enquanto houver valores informados com sinais que precisam de validação. " if signed else "")
                 + ("Há valores com motivo não classificado; o saldo não foi calculado. " if unknown_reason else "")
-                + "Aprovação, recuperação e saldo pendente exigem lançamentos financeiros validados.",
+                + "Aprovado, recuperado e pendente somam apenas os valores explicitamente conferidos, sem estimar dados ausentes.",
     }
 
 

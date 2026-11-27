@@ -255,3 +255,35 @@ class SupplierCheckAudit(Base):
     current: Mapped[dict] = mapped_column(JSON)
     reason: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OperationalPolicy(Base):
+    __tablename__ = "rm_operational_policies"
+    organization: Mapped[str] = mapped_column(String(80), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean)
+    days: Mapped[int] = mapped_column(Integer)
+    start_field: Mapped[str] = mapped_column(String(30))
+    timezone: Mapped[str] = mapped_column(String(80))
+    holidays: Mapped[list[str]] = mapped_column(JSON)
+    reference: Mapped[str] = mapped_column(String(500))
+    revision: Mapped[int] = mapped_column(Integer)
+
+
+class OperationalPolicyAudit(Base):
+    __tablename__ = "rm_operational_policy_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FinancialReview(Base):
+    __tablename__ = "rm_financial_reviews"
+    occurrence_id: Mapped[int] = mapped_column(ForeignKey("rm_occurrences.id"), primary_key=True)
+    approved: Mapped[Decimal | None] = mapped_column(ExactDecimal())
+    recovered: Mapped[Decimal | None] = mapped_column(ExactDecimal())
+    pending: Mapped[Decimal | None] = mapped_column(ExactDecimal())
+    reference: Mapped[str] = mapped_column(String(500))
+    revision: Mapped[int] = mapped_column(Integer)

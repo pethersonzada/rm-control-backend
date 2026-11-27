@@ -43,7 +43,8 @@ def list_occurrences(
         require_store(principal, filters.store)
     if filters.from_date and filters.to_date and filters.from_date > filters.to_date:
         raise HTTPException(422, "A data inicial precisa ser anterior ou igual à final.")
-    calendar = request.app.state.settings.calendars.get(principal.organization)
+    from app.routers.policies import effective_calendar
+    calendar = effective_calendar(engine, principal.organization, request.app.state.settings.calendars.get(principal.organization))
     with Session(engine) as session:
         return occurrences.page(session, principal, limit, cursor, filters, calendar)
 
@@ -66,7 +67,8 @@ def change_status(
 
 @router.get("/summary")
 def summary(principal: Principal, engine: Database, request: Request):
-    return operations.totals(engine, principal, request.app.state.settings.calendars.get(principal.organization))
+    from app.routers.policies import effective_calendar
+    return operations.totals(engine, principal, effective_calendar(engine, principal.organization, request.app.state.settings.calendars.get(principal.organization)))
 
 
 @router.post("/inventory/reconcile")

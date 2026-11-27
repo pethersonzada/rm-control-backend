@@ -10,8 +10,8 @@ from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 from app.config import load_settings
 from app.database import connect
-from app.models import AccessRequest, FirebaseMembership, NativeTicket, Occurrence, Store, SupplierCheck
-from app.routers import admin, catalog, imports, operations, stores, supplier_checks, tickets
+from app.models import AccessRequest, FirebaseMembership, FinancialReview, NativeTicket, Occurrence, OperationalPolicy, Store, SupplierCheck
+from app.routers import admin, catalog, imports, operations, policies, stores, supplier_checks, tickets
 from app.security import RateLimiter, RequestLimits
 
 logger = logging.getLogger("rm_control")
@@ -71,12 +71,15 @@ def create_app(settings=None, engine=None):
             connection.execute(select(Occurrence.id).limit(1))
             connection.execute(select(NativeTicket.occurrence_id).limit(1))
             connection.execute(select(SupplierCheck.id).limit(1))
+            connection.execute(select(OperationalPolicy.organization).limit(1))
+            connection.execute(select(FinancialReview.occurrence_id).limit(1))
             if settings.firebase_project_id:
                 connection.execute(select(Store.id).limit(1))
                 connection.execute(select(AccessRequest.id).limit(1))
                 connection.execute(select(FirebaseMembership.id).limit(1))
         return {"status": "ready"}
 
+    app.include_router(policies.router)
     app.include_router(supplier_checks.router)
     app.include_router(catalog.router)
     app.include_router(stores.router)
