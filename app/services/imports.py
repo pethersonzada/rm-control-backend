@@ -44,7 +44,7 @@ def confirm(engine, principal, records, key=None):
         if len(item_keys) != len(record.items) or len({(invoice.number, invoice.series) for invoice in record.invoices}) != len(record.invoices):
             raise HTTPException(422, "Itens ou notas fiscais duplicados no mesmo chamado.")
     ordered = sorted(records, key=lambda record: (store_key(record.destination), record.code))
-    payload = json.dumps([record.model_dump(mode="json") for record in ordered], separators=(",", ":"), sort_keys=True)
+    payload = json.dumps([record.model_dump(mode="json", exclude={"expected_snapshot"} if getattr(record, "expected_snapshot", None) is None else set()) for record in ordered], separators=(",", ":"), sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     with occurrences.transaction(engine) as session:
         lock_organization(session, "tickets", principal.organization)
