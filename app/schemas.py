@@ -60,6 +60,7 @@ class Record(BaseModel):
 class Paste(BaseModel):
     text: str = Field(min_length=1, max_length=2_000_000)
     target_code: Identifier | None = None
+    target_store: str | None = Field(default=None, max_length=200)
 
 
 class Spreadsheet(BaseModel):
