@@ -110,6 +110,7 @@ class AuditEvent(Base):
     occurrence_id: Mapped[int] = mapped_column(ForeignKey("rm_occurrences.id"))
     previous_status: Mapped[str | None] = mapped_column(String(80))
     next_status: Mapped[str | None] = mapped_column(String(80))
+    details: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
