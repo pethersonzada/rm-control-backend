@@ -287,3 +287,29 @@ class FinancialReview(Base):
     pending: Mapped[Decimal | None] = mapped_column(ExactDecimal())
     reference: Mapped[str] = mapped_column(String(500))
     revision: Mapped[int] = mapped_column(Integer)
+
+
+class UnitReference(Base):
+    __tablename__ = "rm_unit_references"
+    __table_args__ = (UniqueConstraint("organization","code","package",name="uq_rm_unit_reference"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(40))
+    package: Mapped[str] = mapped_column(String(80))
+    base_unit: Mapped[str] = mapped_column(String(80))
+    factor: Mapped[Decimal] = mapped_column(ExactDecimal())
+    reference: Mapped[str] = mapped_column(String(500))
+    active: Mapped[bool] = mapped_column(Boolean)
+    revision: Mapped[int] = mapped_column(Integer)
+
+
+class UnitReferenceAudit(Base):
+    __tablename__ = "rm_unit_reference_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    actor: Mapped[str] = mapped_column(String(80))
+    code: Mapped[str] = mapped_column(String(40))
+    package: Mapped[str] = mapped_column(String(80))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),server_default=func.now())

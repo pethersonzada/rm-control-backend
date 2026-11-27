@@ -1,13 +1,13 @@
 import unicodedata
 from collections import defaultdict
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import store_key
-from app.models import FinancialReview, Occurrence, OccurrenceItem
+from app.models import CatalogProduct, FinancialReview, Occurrence, OccurrenceItem, UnitReference
 from app.parser import STATUSES
 from app.repositories import occurrences
 from app.security import require_store
@@ -85,6 +85,16 @@ def reconcile(engine, principal, body):
     if len(codes) != len(body.items):
         raise HTTPException(422, "PLUs repetidos no inventário; consolide os registros antes da análise.")
     selected = defaultdict(list)
+    references = {}
+    def converted(code, package, quantity):
+        ref = references.get((code, package))
+        if ref is None:
+            return None
+        with localcontext() as context:
+            context.prec = 64
+            value = quantity * ref.factor
+        return {"quantity":format(value,"f"),"unit":ref.base_unit,"reference":ref.reference}
+
     query = select(
         Occurrence.code, Occurrence.reason, Occurrence.status, OccurrenceItem,
     ).join(Occurrence).where(
@@ -94,6 +104,14 @@ def reconcile(engine, principal, body):
         OccurrenceItem.code.in_(codes),
     ).order_by(Occurrence.id, OccurrenceItem.id).limit(20001)
     with Session(engine) as session:
+        if any(item.package for item in body.items):
+            for offset in range(0,len(codes),200):
+                chunk=sorted(codes)[offset:offset+200]
+                rows=session.scalars(select(UnitReference).join(CatalogProduct,(CatalogProduct.organization==UnitReference.organization)&(CatalogProduct.code==UnitReference.code)).where(UnitReference.organization==principal.organization,UnitReference.active.is_(True),CatalogProduct.active.is_(True),UnitReference.code.in_(chunk)))
+                for ref in rows:
+                    if len(references)>=50000:
+                        raise HTTPException(422,"Reduza os PLUs para normalização.")
+                    references[(ref.code,ref.package)]=ref
         for index, (code, reason, status, item) in enumerate(session.execute(query)):
             if index == 20000:
                 raise HTTPException(422, "Resultado excede o limite. Confira um conjunto menor de PLUs.")
@@ -101,13 +119,15 @@ def reconcile(engine, principal, body):
                 selected[item.code].append({
                     "occurrence": code, "reason": reason, "quantity": format(item.quantity, "f"),
                     "package": item.package, "total": format(item.total, "f") if item.total is not None else None,
+                    "normalized": converted(item.code,item.package,item.quantity),
                 })
     return {"items": [{
         "code": item.code, "inventory_quantity": format(item.quantity, "f"),
         "inventory_value": format(item.value, "f") if item.value is not None else None,
         "pending": selected[item.code],
+        "inventory_normalized": converted(item.code,item.package,item.quantity) if item.package else None,
     } for item in body.items],
-        "note": "Cruzamento por loja e PLU. A quantidade de cada embalagem está na unidade de origem."}
+        "note": "Cruzamento por loja e PLU. A unidade original é preservada; normalização informativa somente com fator conferido e embalagem explícita. Nenhum ajuste contábil é aplicado."}
 
 
 def change_status(engine, principal, store, code, body):
