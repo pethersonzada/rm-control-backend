@@ -1,5 +1,7 @@
 """Read-only import comparison and optional lookup for a standalone detail copy."""
 from collections import defaultdict
+import hashlib
+import json
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -32,6 +34,12 @@ def detail_seed(engine, principal, code, store=None):
         # The stored metadata identifies the target; it is not evidence of new status or quantities.
         return dict(code=row.code, destination=row.destination, origin=row.origin, load=row.load,
                     reason=row.reason, status="DESCONHECIDO", items=[], invoices=[])
+
+
+def fingerprint(record):
+    if record is None:
+        return "absent"
+    return hashlib.sha256(json.dumps(record.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def changes(old, record):
@@ -71,6 +79,7 @@ def compare_preview(engine, principal, result):
     records = result["records"]
     counts = dict(new=0, updated=0, unchanged=0, conflicts=0)
     classifications = []
+    reviewed = []
     warnings = result["warnings"]
     grouped = defaultdict(set)
     for record in records:
@@ -107,6 +116,7 @@ def compare_preview(engine, principal, result):
             state = "updated"
         else:
             state = "unchanged"
+        reviewed.append({**record.model_dump(mode="json"), "expected_snapshot": fingerprint(old)})
         counts[state] += 1
         classifications.append({"code": record.code, "destination": record.destination, "state": state})
-    return {**result, "comparison": counts, "classifications": classifications}
+    return {**result, "records": reviewed, "comparison": counts, "classifications": classifications}
