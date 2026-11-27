@@ -52,7 +52,7 @@ def workbook(
             result = spreadsheet.parse_file(file.file, sheet or None, skip_invalid, json.loads(mapping) if mapping else None)
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
-    return imports.check_preview(principal, result)
+    return import_preview.compare_preview(engine, principal, imports.check_preview(principal, result))
 
 
 @router.post("/confirm")
