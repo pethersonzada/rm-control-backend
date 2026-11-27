@@ -93,3 +93,20 @@ def test_business_calendar_with_holiday():
         "due_at": "2026-01-14", "deadline_passed": True,
     }
     assert deadline({"received_at": None}, calendar) == {}
+
+
+def test_summary_deadlines_are_opt_in(workspace):
+    from dataclasses import replace
+    from test_api import RECORD
+    client, _ = workspace
+    auth = headers()
+    assert client.post("/imports/confirm", json=[RECORD], headers=auth).status_code == 200
+    assert client.get("/summary", headers=auth).json()["deadline_counts"] is None
+    calendar = Calendar(2, "received_at", ZoneInfo("America/Recife"), frozenset())
+    client.app.state.settings = replace(client.app.state.settings, calendars={"alpha": calendar})
+    # The app's summary uses request state, not a guessed corporate SLA.
+    from app.services.operations import totals
+    identity = next(p for p in client.app.state.settings.identities.values() if p.subject == "editor")
+    counts = totals(client.app.state.engine, identity, calendar)["deadline_counts"]
+    assert sum(counts.values()) == 1 and counts["missing_date"] == 0
+    assert client.get("/summary", headers=auth).json()["deadline_counts"] is not None
