@@ -219,3 +219,39 @@ class CatalogAudit(Base):
     previous: Mapped[dict | None] = mapped_column(JSON)
     current: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierCheck(Base):
+    __tablename__ = "rm_supplier_checks"
+    __table_args__ = (
+        UniqueConstraint("organization", "created_by", "request_key", name="uq_rm_supplier_check_request"),
+        Index("ix_rm_supplier_checks_scope", "organization", "store", "checked_at"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    organization: Mapped[str] = mapped_column(String(80))
+    store: Mapped[str] = mapped_column(String(200))
+    supplier_code: Mapped[str | None] = mapped_column(String(80))
+    supplier_name: Mapped[str] = mapped_column(String(200))
+    checker: Mapped[str] = mapped_column(String(200))
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reference: Mapped[str | None] = mapped_column(String(120))
+    notes: Mapped[str | None] = mapped_column(String(1000))
+    active: Mapped[bool] = mapped_column(Boolean)
+    revision: Mapped[int] = mapped_column(Integer)
+    created_by: Mapped[str] = mapped_column(String(80))
+    request_key: Mapped[str] = mapped_column(String(64))
+    digest: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SupplierCheckAudit(Base):
+    __tablename__ = "rm_supplier_check_audit"
+    __table_args__ = (Index("ix_rm_supplier_check_audit_check", "check_id", "id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    check_id: Mapped[int] = mapped_column(ForeignKey("rm_supplier_checks.id"))
+    actor: Mapped[str] = mapped_column(String(80))
+    action: Mapped[str] = mapped_column(String(40))
+    previous: Mapped[dict | None] = mapped_column(JSON)
+    current: Mapped[dict] = mapped_column(JSON)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
