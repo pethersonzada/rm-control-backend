@@ -34,7 +34,7 @@ def snapshot(row):
 
 
 @router.get("/admin/units")
-def units(principal:Admin,engine=Depends(database),code:Annotated[str,Query(pattern=r"^[0-9]{1,40}$")]):
+def units(principal:Admin,code:Annotated[str,Query(pattern=r"^[0-9]{1,40}$")],engine=Depends(database)):
     if not principal.can_delegate_admin:
         raise HTTPException(403,"Somente o responsável pode configurar referências.")
     with Session(engine) as session:

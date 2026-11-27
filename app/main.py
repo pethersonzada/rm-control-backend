@@ -1,5 +1,7 @@
 import logging
 import time
+import threading
+from collections import Counter
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -28,6 +30,9 @@ def create_app(settings=None, engine=None):
             logger.error("database_configuration_invalid")
     app.state.engine = engine
     app.state.limiter = RateLimiter()
+    metrics_lock = threading.Lock()
+    metrics = Counter()
+    uptime_start = time.monotonic()
     app.add_middleware(RequestLimits)
     app.add_middleware(
         CORSMiddleware, allow_origins=list(settings.origins),
@@ -39,7 +44,22 @@ def create_app(settings=None, engine=None):
     @app.middleware("http")
     async def observe(request: Request, call_next):
         started = time.monotonic()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            with metrics_lock:
+                metrics["requests"] += 1
+                metrics["server_errors"] += 1
+            logger.error("unhandled_request_error route=%s", getattr(request.scope.get("route"), "path", "unmatched"))
+            return JSONResponse({"detail":"Erro interno. Tente novamente."},500,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+        duration_ms = (time.monotonic() - started) * 1000
+        with metrics_lock:
+            metrics["requests"] += 1
+            metrics["duration_ms"] += duration_ms
+            metrics["server_errors"] += int(response.status_code >= 500)
+            metrics["client_errors"] += int(400 <= response.status_code < 500)
+            metrics["rate_limited"] += int(response.status_code == 429)
+            metrics["slow_requests"] += int(duration_ms >= 5000)
         route = request.scope.get("route")
         logger.info(
             "http_request route=%s method=%s status=%d duration_ms=%.1f",
@@ -58,6 +78,21 @@ def create_app(settings=None, engine=None):
     async def database_error(_request, _error):
         logger.warning("database_operation_failed")
         return JSONResponse({"detail": "Banco indisponível ou operação interrompida. Tente novamente."}, 503)
+
+    from app.routers.stores import Admin
+
+    @app.get("/admin/diagnostics")
+    def diagnostics(principal: Admin):
+        if not principal.can_delegate_admin:
+            raise HTTPException(403, "Acesso restrito ao responsável.")
+        with metrics_lock:
+            values = dict(metrics)
+        count = values.get("requests",0)
+        return {"uptime_seconds":int(time.monotonic()-uptime_start),"requests":count,
+                "server_errors":values.get("server_errors",0),"client_errors":values.get("client_errors",0),
+                "rate_limited":values.get("rate_limited",0),"slow_requests":values.get("slow_requests",0),
+                "mean_duration_ms":round(values.get("duration_ms",0)/max(count,1),1),
+                "scope":"process-local"}
 
     @app.get("/health")
     def health():

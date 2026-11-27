@@ -22,3 +22,10 @@
 - Abertura/edição com revisão, exportação XLSX filtrada e histórico.
 - Comparação de prévia com banco, TSV explícito, detalhes avulsos e mapeamento de cabeçalhos XLSX.
 - Pendências externas: validar formato real da origem, modelo Excel/WPS, regras financeiras, catálogo de unidades e publicação autenticada.
+
+## Em desenvolvimento: conferências e configurações
+
+- Migrações aditivas 0006–0008: fornecedores conferidos, calendário, valores financeiros e referências de unidades com auditoria.
+- Relatório XLSX de fornecedores e totais por conferente, correção e cancelamento com motivo.
+- Diagnóstico administrativo local ao processo, sem conteúdo de requisições.
+- Regras e valores reais permanecem dependentes de validação do responsável.

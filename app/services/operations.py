@@ -105,8 +105,9 @@ def reconcile(engine, principal, body):
     ).order_by(Occurrence.id, OccurrenceItem.id).limit(20001)
     with Session(engine) as session:
         if any(item.package for item in body.items):
+            ordered_codes=sorted(codes)
             for offset in range(0,len(codes),200):
-                chunk=sorted(codes)[offset:offset+200]
+                chunk=ordered_codes[offset:offset+200]
                 rows=session.scalars(select(UnitReference).join(CatalogProduct,(CatalogProduct.organization==UnitReference.organization)&(CatalogProduct.code==UnitReference.code)).where(UnitReference.organization==principal.organization,UnitReference.active.is_(True),CatalogProduct.active.is_(True),UnitReference.code.in_(chunk)))
                 for ref in rows:
                     if len(references)>=50000:
