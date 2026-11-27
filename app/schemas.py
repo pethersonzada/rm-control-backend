@@ -67,6 +67,7 @@ class Spreadsheet(BaseModel):
     content_base64: str = Field(min_length=1, max_length=28_000_000)
     sheet: str | None = Field(default=None, max_length=31)
     skip_invalid: bool = False
+    mapping: dict[str, str] | None = None
 
 
 class InventoryItem(BaseModel):
