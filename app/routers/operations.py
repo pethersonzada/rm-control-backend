@@ -3,9 +3,11 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from app.models import AuditEvent, Occurrence
 
-from app.config import Identity
+from app.config import Identity, store_key
 from app.database import database
 from app.repositories import occurrences
 from app.schemas import InventoryRequest, StatusUpdate
@@ -70,3 +72,30 @@ def summary(principal: Principal, engine: Database):
 @router.post("/inventory/reconcile")
 def reconcile(body: InventoryRequest, principal: Principal, engine: Database):
     return operations.reconcile(engine, principal, body)
+
+
+@router.get("/occurrences/{code}/history")
+def history(
+    code: Annotated[str, Path(pattern=r"^[0-9]{1,40}$")],
+    store: Annotated[str, Query(min_length=1, max_length=200)],
+    principal: Principal, engine: Database,
+    cursor: Annotated[int, Query(ge=0)] = 0,
+):
+    require_store(principal, store)
+    with Session(engine) as session:
+        row = session.scalar(occurrences.scoped(principal).where(
+            Occurrence.store == store_key(store), Occurrence.code == code,
+        ))
+        if row is None:
+            raise HTTPException(404, "Chamado não encontrado.")
+        query = select(AuditEvent).where(
+            AuditEvent.organization == principal.organization,
+            AuditEvent.store == row.store, AuditEvent.occurrence_id == row.id,
+        )
+        if cursor:
+            query = query.where(AuditEvent.id < cursor)
+        events = session.scalars(query.order_by(AuditEvent.id.desc()).limit(101)).all()
+        return {"events": [{"action": e.action, "subject": e.subject, "previous_status": e.previous_status,
+                            "next_status": e.next_status, "created_at": e.created_at.isoformat(),
+                            "details": e.details} for e in events[:100]],
+                "next_cursor": events[99].id if len(events) > 100 else None}
