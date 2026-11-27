@@ -37,7 +37,10 @@ def test_preview_classification_and_details(workspace):
     assert client.get("/occurrences", headers=auth).json()["records"] == []
     assert client.post("/imports/confirm", headers=auth, json=result["records"]).status_code == 200
     assert preview(TABLE).json()["comparison"]["unchanged"] == 2
-    assert preview(TABLE.replace("-12,34", "-13,34")).json()["comparison"]["updated"] == 1
+    changed = preview(TABLE.replace("-12,34", "-13,34")).json()
+    assert changed["comparison"]["updated"] == 1
+    assert client.patch("/occurrences/090001/status?store=2", headers=auth, json={"status":"APROVADO","expected_status":"DESCONHECIDO"}).status_code == 200
+    assert client.post("/imports/confirm", headers=auth, json=changed["records"]).status_code == 409
     assert client.post("/imports/confirm", headers=auth, json=[RECORD]).status_code == 200
     detail = preview(DETAIL, target_code="90001", target_store="2")
     assert detail.status_code == 200
