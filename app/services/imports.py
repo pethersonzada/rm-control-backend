@@ -17,6 +17,8 @@ def check_preview(principal, result):
     records = []
     warnings = result["warnings"]
     blocked = result.get("blocked", False)
+    if len(result["records"]) > 10000:
+        raise HTTPException(422, "Prévia limitada a 10 mil chamados. Divida a origem em lotes menores.")
     for index, data in enumerate(result["records"], 1):
         try:
             record = Record.model_validate(data)
@@ -38,8 +40,8 @@ def confirm(engine, principal, records, key=None):
         if record.source == "native":
             raise HTTPException(422, "Use a abertura nativa de chamados.")
         item_keys = {(item.code, item.package) for item in record.items}
-        if len(item_keys) != len(record.items):
-            raise HTTPException(422, "Itens duplicados no mesmo chamado.")
+        if len(item_keys) != len(record.items) or len({(invoice.number, invoice.series) for invoice in record.invoices}) != len(record.invoices):
+            raise HTTPException(422, "Itens ou notas fiscais duplicados no mesmo chamado.")
     ordered = sorted(records, key=lambda record: (store_key(record.destination), record.code))
     payload = json.dumps([record.model_dump(mode="json") for record in ordered], separators=(",", ":"), sort_keys=True)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
