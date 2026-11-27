@@ -123,7 +123,7 @@ class RequestLimits:
             if path.startswith("/imports/") or (path.startswith("/tickets") and request.method in {"POST", "PUT"}) or request.method == "PATCH":
                 can_write(principal)
             request.state.principal = principal
-            limit = self.limits.get(path, 16384)
+            limit = self.limits.get(path, 2_000_000 if path.startswith('/tickets/') and request.method == 'PUT' else 16384)
             if request.app.state.settings.mode == "operational" and path == "/imports/spreadsheet":
                 limit = 1_000_000
             if int(request.headers.get("content-length", "0")) > limit:
