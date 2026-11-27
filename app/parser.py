@@ -39,7 +39,7 @@ def parse_list(text: str):
                 blocked = True
         current["included_at"] = dates[0] if dates else None
         current["approved_at"] = dates[1] if len(dates) > 1 else None
-        current["is_test"] = bool(re.search(r"\bTESTE\b.*\bNAO ENVIAR\b", normalized))
+        current["is_test"] = True if re.search(r"\bTESTE\b.*\bNAO ENVIAR\b", normalized) else None
         current["status"] = next((s for s in STATUSES if re.search(r"(?<!\w)" + re.escape(s) + r"(?!\w)", normalized)), "DESCONHECIDO")
         if current["status"] == "DESCONHECIDO":
             warnings.append(f"Chamado {current['code']}: status não reconhecido.")
@@ -55,7 +55,8 @@ def parse_list(text: str):
             finish()
             code, origin, destination, load, rest = match.groups()
             current = dict(code=code, origin=origin, destination=destination, load=load, reason="", included_at=None, status="DESCONHECIDO", items=[])
-            key = (code, destination)
+            from app.config import store_key
+            key = (code, store_key(destination))
             if key in seen_records:
                 warnings.append(f"Chamado {code}: duplicado na listagem.")
                 blocked = True
@@ -101,7 +102,7 @@ def parse_list(text: str):
     return {"records": records, "warnings": warnings[:100], "blocked": blocked}
 
 
-def parse(text: str, target_code: str | None = None):
+def parse(text: str, target_code: str | None = None, seed=None):
     result = parse_list(text)
     records, warnings = result["records"], result["warnings"]
     split = re.split(r"(?m)^\s*Editar\s*$", text, maxsplit=1)
@@ -119,7 +120,12 @@ def parse(text: str, target_code: str | None = None):
         return None
     load, bdv = field("Nº Carga"), field("Nº BDV")
     origin, destination, reason = field("CD Origem"), field("Lojas"), field("Motivo")
-    candidates = [r for r in records if r["load"] == load and r["origin"] == origin and r["destination"] == destination and r["reason"] == reason]
+    if not records and seed and target_code == seed["code"]:
+        records.append(seed)
+        warnings[:] = [w for w in warnings if not w.startswith("Nenhum chamado reconhecido.")]
+    def same(a, b):
+        return bool(a and b) and " ".join(normalized(a).split()) == " ".join(normalized(b).split())
+    candidates = [r for r in records if same(r["load"], load) and same(r["origin"], origin) and same(r["destination"], destination) and same(r["reason"], reason)]
     if target_code:
         candidates = [r for r in candidates if r["code"] == target_code]
     if len(candidates) != 1:
@@ -127,6 +133,9 @@ def parse(text: str, target_code: str | None = None):
         result["blocked"] = True
         return result
     record = candidates[0]
+    if bdv and not bdv.isdigit():
+        warnings.append("BDV inválido nos detalhes.")
+        result["blocked"] = True
     record["bdv"] = bdv if bdv and bdv.isdigit() else None
     mode = None
     detailed = set()
