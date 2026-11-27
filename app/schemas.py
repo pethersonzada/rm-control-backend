@@ -57,6 +57,10 @@ class Record(BaseModel):
         return value
 
 
+class ImportRecord(Record):
+    expected_snapshot: str | None = Field(default=None, pattern=r"^(absent|[a-f0-9]{64})$")
+
+
 class Paste(BaseModel):
     text: str = Field(min_length=1, max_length=2_000_000)
     target_code: Identifier | None = None
